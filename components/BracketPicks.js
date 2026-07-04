@@ -94,7 +94,7 @@
     // the winner and it advances). To keep this module self-contained (no DOM, no
     // DrawBracket), we resolve advancement here too, so derivation is testable in
     // isolation and the picks model is the single source of truth.
-    function derivePickedDraw(officialDraw, picks) {
+    function derivePickedDraw(officialDraw, picks, opts) {
         picks = picks || {};
         if (!officialDraw || !Array.isArray(officialDraw)) return officialDraw;
 
@@ -106,7 +106,7 @@
         // rounds so DrawBracket receives the complete tree and renders each card with
         // data-match-key equal to the key we emit here — the round-trip BracketMaker
         // relies on when it reads a pick back under that same key.
-        const slots = resolveAdvancement(officialDraw, picks);
+        const slots = resolveAdvancement(officialDraw, picks, opts);
         if (!slots.length) return officialDraw;
 
         // Pull round labels from the official draw where we have them (keyed by the
@@ -169,13 +169,23 @@
     //
     // Accepts either (officialDraw, picks) or a single already-derived draw arg
     // (picks defaults to {} — winners already encoded on the matches).
-    function resolveAdvancement(officialDraw, picks) {
-        // Two modes:
+    //
+    // opts.scratch (NEW, iteration 2): "prediction canvas" mode — the bracket a
+    // fan fills FROM SCRATCH. First-round pairings come from the official draw
+    // (they're the entry list), but real results NEVER pre-fill the canvas:
+    // played first-round matches are pickable like any other, and every later
+    // round derives solely from the user's picks. Only BYE/placeholder matches
+    // keep their official auto-advance (there is nothing to predict). Reality is
+    // used for GRADING (scoring, hit/miss chips), never for filling the canvas.
+    function resolveAdvancement(officialDraw, picks, opts) {
+        // Modes:
         //   - picks provided  → "re-decide": clear non-official winners, then apply
         //     picks per round (canonical engine; used everywhere internally).
         //   - picks omitted    → "trust the draw": keep whatever `winner` each match
         //     already carries (for an already-derived draw). The 1-arg form.
+        //   - opts.scratch     → prediction canvas (see above).
         const hasPicks = picks != null;
+        const scratch = !!(opts && opts.scratch);
         picks = picks || {};
         // Bucket by roundId.
         const byRound = {};
@@ -249,6 +259,15 @@
             // Re-decide mode: reset non-official winner so a removed pick doesn't
             // linger. Trust mode (no picks): keep the encoded winner as-is.
             if (hasPicks && !hasOfficialWinner(c)) c.winner = null;
+            // Scratch canvas: a real, played first-round match is STILL the user's
+            // to predict — neutralize its result so it renders open and pickable.
+            // BYE/placeholder matches keep the official auto-advance.
+            if (scratch && !isPlaceholderName(c.player1Name) && !isPlaceholderName(c.player2Name)) {
+                c.winner = null;
+                c.status = 'Not Started';
+                c.isLive = false;
+                c.setScores = [];
+            }
             applyDecision(c, 0, si);
             slots[0][si] = c;
         });
@@ -263,12 +282,24 @@
             for (let si = 0; si < slots[ri].length; si++) {
                 const wA = winnerOf(slots[ri - 1][si * 2]);
                 const wB = winnerOf(slots[ri - 1][si * 2 + 1]);
-                const base = real[si] ? Object.assign({}, real[si]) : {
-                    matchKey: '__inf_' + ri + '_' + si,
-                    roundId: rid,
-                    status: 'Not Started',
-                    winner: null,
-                };
+                // Scratch canvas: later rounds are ALWAYS synthesized from the
+                // user's own advancement — a real match at this slot contributes
+                // only its stable matchKey (so picks stay keyed consistently with
+                // non-scratch flows and server scoring), never players or result.
+                const base = scratch
+                    ? {
+                        matchKey: (real[si] && isRealKey(real[si].matchKey))
+                            ? real[si].matchKey : '__inf_' + ri + '_' + si,
+                        roundId: rid,
+                        status: 'Not Started',
+                        winner: null,
+                    }
+                    : (real[si] ? Object.assign({}, real[si]) : {
+                        matchKey: '__inf_' + ri + '_' + si,
+                        roundId: rid,
+                        status: 'Not Started',
+                        winner: null,
+                    });
                 const wasOfficial = hasOfficialWinner(base);
                 // Overlay derived players (cascade truth) onto the slot.
                 base.player1Key = wA ? wA.key : '';
@@ -299,13 +330,14 @@
     // actually reachable in that match's slot given the rest of the picks. Drops
     // ghosts: picks whose winner is no longer in the slot (cascade fallout), and
     // picks against Finished matches (truth wins).
-    function pruneInvalid(picks, officialDraw) {
+    function pruneInvalid(picks, officialDraw, opts) {
         picks = picks || {};
         if (!officialDraw || !Array.isArray(officialDraw)) return {};
 
         // Resolve the full bracket with the current picks applied, so downstream
-        // slots reflect upstream winners.
-        const slots = resolveAdvancement(officialDraw, picks);
+        // slots reflect upstream winners. In scratch mode the canvas semantics
+        // apply — picks on real-played matches are VALID (reality only grades).
+        const slots = resolveAdvancement(officialDraw, picks, opts);
 
         // Build matchKey → resolved {player1Key, player2Key, finished}.
         const resolvedByKey = new Map();
@@ -357,8 +389,8 @@
     // ── championKey ─────────────────────────────────────────────────────────────
     // Returns the picked/decided champion playerKey, or null. The final round
     // is roundId 12 (or the last resolved round if 12 absent).
-    function championKey(officialDraw, picks) {
-        const slots = resolveAdvancement(officialDraw, picks);
+    function championKey(officialDraw, picks, opts) {
+        const slots = resolveAdvancement(officialDraw, picks, opts);
         if (!slots.length) return null;
         const finalRound = slots[slots.length - 1];
         if (!finalRound || !finalRound.length) return null;

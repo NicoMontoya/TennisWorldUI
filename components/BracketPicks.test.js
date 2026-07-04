@@ -284,3 +284,69 @@ test('real-key pick beats a stale positional alias for the same slot', () => {
     const pruned = BP.pruneInvalid(picks, fourPlayerDrawWithRealFinal());
     assert.strictEqual(pruned['100'], 'C', 'explicit real-key pick wins');
 });
+
+// ── Scratch canvas (iteration 2): build-from-scratch prediction bracket ──────
+
+function playedDraw() {
+    // Both SFs decided in reality; final delivered and decided.
+    return [
+        { round: 'Final', matches: [
+            { matchKey: '100', roundId: 12, status: 'Finished', winner: 'player1',
+              player1Key: 'A', player1Name: 'Player A', player2Key: 'C', player2Name: 'Player C' },
+        ]},
+        { round: 'Semifinals', matches: [
+            { matchKey: '10', roundId: 10, status: 'Finished', winner: 'player1',
+              player1Key: 'A', player1Name: 'Player A', player2Key: 'B', player2Name: 'Player B' },
+            { matchKey: '11', roundId: 10, status: 'Finished', winner: 'player1',
+              player1Key: 'C', player1Name: 'Player C', player2Key: 'D', player2Name: 'Player D' },
+        ]},
+    ];
+}
+
+test('scratch: zero picks → first round pairings only, later rounds TBD (reality ignored)', () => {
+    const slots = BP.resolveAdvancement(playedDraw(), {}, { scratch: true });
+    const r1 = slots[0];
+    assert.strictEqual(r1[0].winner, null, 'played match renders undecided on the canvas');
+    assert.strictEqual(r1[0].status, 'Not Started');
+    const final = slots[1][0];
+    assert.strictEqual(final.player1Name, 'TBD', 'no real winner pre-fills the final');
+    assert.strictEqual(final.player2Name, 'TBD');
+});
+
+test('scratch: played first-round matches are pickable; picks advance my way', () => {
+    // Reality: A and C won. My bracket: B and D all the way.
+    const picks = { '10': 'B', '11': 'D', '100': 'D' };
+    const slots = BP.resolveAdvancement(playedDraw(), picks, { scratch: true });
+    const final = slots[1][0];
+    assert.strictEqual(String(final.player1Key), 'B', 'my B advances despite real result');
+    assert.strictEqual(String(final.player2Key), 'D');
+    assert.strictEqual(final.winner, 'player2', 'my champion D decided');
+    assert.strictEqual(String(final.matchKey), '100', 'real matchKey reused at the slot');
+});
+
+test('scratch: BYE auto-advances and stays unpickable', () => {
+    const draw = [
+        { round: 'Semifinals', matches: [
+            { matchKey: '10', roundId: 10, status: 'Finished', winner: 'player1',
+              player1Key: 'A', player1Name: 'Player A', player2Key: '', player2Name: 'BYE' },
+            { matchKey: '11', roundId: 10, status: 'Not Started', winner: null,
+              player1Key: 'C', player1Name: 'Player C', player2Key: 'D', player2Name: 'Player D' },
+        ]},
+    ];
+    const slots = BP.resolveAdvancement(draw, {}, { scratch: true });
+    assert.strictEqual(slots[0][0].winner, 'player1', 'BYE keeps official auto-advance');
+    assert.strictEqual(BP.isPickable(slots[0][0]), false, 'BYE match not pickable');
+    const final = slots[1][0];
+    assert.strictEqual(String(final.player1Key), 'A', 'bye player advanced into next round');
+});
+
+test('scratch: pruneInvalid keeps picks on played matches (reality only grades)', () => {
+    const picks = { '10': 'B', '11': 'D', '100': 'D' };
+    const pruned = BP.pruneInvalid(picks, playedDraw(), { scratch: true });
+    assert.deepStrictEqual(pruned, { '10': 'B', '11': 'D', '100': 'D' });
+});
+
+test('non-scratch behavior unchanged: truth still beats picks in default mode', () => {
+    const pruned = BP.pruneInvalid({ '10': 'B' }, playedDraw());
+    assert.deepStrictEqual(pruned, {}, 'default mode drops picks on finished matches');
+});

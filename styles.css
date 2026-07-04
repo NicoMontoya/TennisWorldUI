@@ -6037,3 +6037,19 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
 .profile-bracket-row:hover .profile-bracket-name { text-decoration: underline; }
 .profile-bracket-name { font-weight: 600; }
 .profile-bracket-meta { font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
+
+/* ── Scratch canvas: grading + onboarding hint ────────────────────────────── */
+.bm-hint {
+    width: 100%; margin-top: 0.5rem; padding: 0.55rem 0.8rem;
+    border: 1px dashed var(--border); border-radius: 8px;
+    color: var(--text-secondary); font-size: 0.85rem; line-height: 1.45;
+    background: color-mix(in srgb, var(--positive, #3a9d5d) 5%, transparent);
+}
+.bm-pickmode .db-card.bm-hit  { box-shadow: inset 3px 0 0 var(--positive, #3a9d5d); }
+.bm-pickmode .db-card.bm-miss { box-shadow: inset 3px 0 0 var(--negative, #c0504d); opacity: 0.92; }
+.bm-pickmode .db-card.bm-hit::after,
+.bm-pickmode .db-card.bm-miss::after {
+    position: absolute; top: 2px; right: 4px; font-size: 0.65rem; line-height: 1;
+}
+.bm-pickmode .db-card.bm-hit::after  { content: '✓'; color: var(--positive, #3a9d5d); }
+.bm-pickmode .db-card.bm-miss::after { content: '✕'; color: var(--negative, #c0504d); }

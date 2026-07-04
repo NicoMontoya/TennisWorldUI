@@ -47,10 +47,13 @@ window.TW = window.TW || {};
 
         const tk = String(cfg.tournamentKey || cfg.tournamentName || 'unknown');
         const drawId = computeDrawId(cfg.officialDraw);
+        // The pick canvas is built FROM SCRATCH (iteration 2): reality grades
+        // picks, it never pre-fills them. All pick-model calls share this opt.
+        const SCRATCH = { scratch: true };
 
         // Restore working picks (survive reload), pruning against the current draw.
         const working = store.getWorking(tk);
-        let picks = bp.pruneInvalid(working.picks || {}, cfg.officialDraw);
+        let picks = bp.pruneInvalid(working.picks || {}, cfg.officialDraw, SCRATCH);
         // Warn (console only) if the saved draw version differs — picks pruned above.
         if (working.drawId && working.drawId !== drawId) {
             console.warn('[BracketMaker] draw changed since last visit — stale picks pruned.');
@@ -97,14 +100,14 @@ window.TW = window.TW || {};
             // Read-only view of someone else's bracket (from Leaders). Rendered
             // through the SAME derive-only path — official data never mutated.
             if (viewing) {
-                cfg.renderBracket(bp.derivePickedDraw(cfg.officialDraw, viewing.picks), 'official');
+                cfg.renderBracket(bp.derivePickedDraw(cfg.officialDraw, viewing.picks, SCRATCH), 'official');
                 if (cfg.wrapEl) cfg.wrapEl.classList.remove('bm-pickmode');
                 controls.syncViewing(viewing);
                 return;
             }
             controls.syncViewing(null);
             const draw = (mode === 'picks')
-                ? bp.derivePickedDraw(cfg.officialDraw, currentPicks())
+                ? bp.derivePickedDraw(cfg.officialDraw, currentPicks(), SCRATCH)
                 : cfg.officialDraw;
             // draws.js owns the actual DrawBracket call (keeps prob bars + scroll).
             cfg.renderBracket(draw, mode);
@@ -114,7 +117,7 @@ window.TW = window.TW || {};
             } else if (cfg.wrapEl) {
                 cfg.wrapEl.classList.remove('bm-pickmode'); // drop pick-mode styling hook
             }
-            controls.syncChampion(bp.championKey(cfg.officialDraw, currentPicks()), cfg);
+            controls.syncChampion(bp.championKey(cfg.officialDraw, currentPicks(), SCRATCH), cfg);
         }
 
         // ── Insights: progress counter + success-probability bar ──────────────
@@ -124,7 +127,7 @@ window.TW = window.TW || {};
         // aggregate, NOT a path product (which would be astronomically small).
         async function updateInsights() {
             const token = ++changeToken;
-            const slots = bp.resolveAdvancement(cfg.officialDraw, currentPicks());
+            const slots = bp.resolveAdvancement(cfg.officialDraw, currentPicks(), SCRATCH);
             let open = 0, picked = 0;
             const pickedMatches = [];
             slots.forEach(function (col) {
@@ -175,7 +178,7 @@ window.TW = window.TW || {};
             if (!root) return;
             root.classList.add('bm-pickmode');
 
-            const slots = bp.resolveAdvancement(cfg.officialDraw, currentPicks());
+            const slots = bp.resolveAdvancement(cfg.officialDraw, currentPicks(), SCRATCH);
             // matchKey → resolved match (for pickability + sides).
             const resolved = new Map();
             for (const round of slots) {
@@ -213,6 +216,26 @@ window.TW = window.TW || {};
                 });
             });
 
+            // Grade picks against reality. The canvas never pre-fills from real
+            // results, but decided matches DO grade the user's pick: green when
+            // their pick matched the real winner of that slot, red when not.
+            const actual = new Map();
+            for (const r of cfg.officialDraw) {
+                for (const m of (r.matches || [])) {
+                    if (!bp.hasOfficialWinner(m)) continue;
+                    actual.set(String(m.matchKey),
+                        m.winner === 'player1' ? String(m.player1Key) : String(m.player2Key));
+                }
+            }
+            cards.forEach(function (card) {
+                const key = String(card.dataset.matchKey);
+                card.classList.remove('bm-hit', 'bm-miss');
+                const pick = currentPicks()[key];
+                if (!pick || !actual.has(key)) return;
+                card.classList.add(String(pick) === actual.get(key) ? 'bm-hit' : 'bm-miss');
+            });
+
+            controls.syncHint(Object.keys(currentPicks()).length);
             highlightPath(root, slots);
         }
 
@@ -223,7 +246,7 @@ window.TW = window.TW || {};
             next[matchKey] = String(winnerKey);
             // Storage hygiene runs ONLY here (not during render): drop any pick that
             // this change orphaned downstream, so the working copy stays clean.
-            const pruned = bp.pruneInvalid(next, cfg.officialDraw);
+            const pruned = bp.pruneInvalid(next, cfg.officialDraw, SCRATCH);
             setPicks(pruned);
         }
 
@@ -246,7 +269,7 @@ window.TW = window.TW || {};
                 if (window.TW.auth && TW.auth.openModal) TW.auth.openModal('signin');
                 return;
             }
-            const pruned = bp.pruneInvalid(currentPicks(), cfg.officialDraw);
+            const pruned = bp.pruneInvalid(currentPicks(), cfg.officialDraw, SCRATCH);
             if (!Object.keys(pruned).length) {
                 controls.flashStatus('Make some picks first');
                 return;
@@ -311,7 +334,7 @@ window.TW = window.TW || {};
 
         // Save current working picks under a name.
         function saveAs(name) {
-            const pruned = bp.pruneInvalid(currentPicks(), cfg.officialDraw);
+            const pruned = bp.pruneInvalid(currentPicks(), cfg.officialDraw, SCRATCH);
             return store.save({
                 name: name, tournamentKey: tk, picks: pruned, drawId: drawId,
             });
@@ -321,7 +344,7 @@ window.TW = window.TW || {};
             const rec = store.load(id);
             if (!rec) return false;
             // Prune against the CURRENT draw (player may no longer be in draw).
-            const pruned = bp.pruneInvalid(rec.picks || {}, cfg.officialDraw);
+            const pruned = bp.pruneInvalid(rec.picks || {}, cfg.officialDraw, SCRATCH);
             if (rec.drawId && rec.drawId !== drawId) {
                 controls.flashStatus('Draw changed — some picks dropped');
             }
@@ -382,6 +405,7 @@ window.TW = window.TW || {};
             syncMode: function () {}, syncChampion: function () {},
             syncProgress: function () {}, syncConfidence: function () {},
             setAccountBusy: function () {}, syncViewing: function () {},
+            syncHint: function () {},
             flashStatus: function () {}, bindActions: function () {}, el: null,
         };
         if (!host) return noop;
@@ -395,7 +419,7 @@ window.TW = window.TW || {};
         toggle.className = 'bm-toggle';
         toggle.setAttribute('role', 'tablist');
         const btnOfficial = mkBtn('Official Draw', 'bm-toggle-btn');
-        const btnPicks = mkBtn('My Picks', 'bm-toggle-btn');
+        const btnPicks = mkBtn('Build My Bracket', 'bm-toggle-btn');
         btnOfficial.onclick = function () { ctx.setMode('official'); };
         btnPicks.onclick = function () { ctx.setMode('picks'); };
         toggle.appendChild(btnOfficial);
@@ -423,6 +447,13 @@ window.TW = window.TW || {};
         status.className = 'bm-status';
         status.setAttribute('role', 'status');
         bar.appendChild(status);
+
+        // Onboarding hint — shown while the canvas has no picks yet.
+        const hint = document.createElement('div');
+        hint.className = 'bm-hint';
+        hint.hidden = true;
+        hint.textContent = 'Your bracket starts blank — click a player in each first-round match to advance them, round by round, all the way to your champion. Real results grade your picks (green = you called it) but never fill them in for you.';
+        bar.appendChild(hint);
 
         // Insights row (pick mode): progress counter + success-probability bar.
         const insights = document.createElement('div');
@@ -480,11 +511,15 @@ window.TW = window.TW || {};
             btnOfficial.classList.toggle('active', !isPicks);
             actions.style.display = isPicks ? '' : 'none';
             insights.hidden = !isPicks;
-            if (!isPicks) { panel.hidden = true; champ.hidden = true; }
+            if (!isPicks) { panel.hidden = true; champ.hidden = true; hint.hidden = true; }
         }
 
         function syncProgress(picked, open) {
             progress.textContent = open ? picked + '/' + open + ' picked' : '';
+        }
+
+        function syncHint(nPicks) {
+            hint.hidden = !(nPicks === 0 && btnPicks.classList.contains('active'));
         }
 
         function syncConfidence(pct, n) {
@@ -649,6 +684,7 @@ window.TW = window.TW || {};
             syncMode: syncMode, syncChampion: syncChampion,
             syncProgress: syncProgress, syncConfidence: syncConfidence,
             setAccountBusy: setAccountBusy, syncViewing: syncViewing,
+            syncHint: syncHint,
             flashStatus: flashStatus, bindActions: bindActions, el: bar,
         };
     }
