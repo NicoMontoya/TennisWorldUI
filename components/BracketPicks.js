@@ -219,10 +219,16 @@
 
         // Apply a pick (or keep official winner) to a slot's match object, mutating
         // its `winner`. Truth (Finished/official winner) always wins.
-        function applyDecision(m) {
+        // Positional fallback: a pick made while this slot was still PROJECTED was
+        // stored under '__inf_{col}_{slot}'. When the round later materializes with
+        // a real matchKey, honor the old positional key so multi-day-tournament
+        // picks survive draw growth (column/slot indexes are stable: matchKey-
+        // ascending within round, base = first delivered round).
+        function applyDecision(m, ci, si) {
             if (!m) return;
             if (hasOfficialWinner(m)) return;            // locked to real result
-            const pick = picks[m.matchKey];
+            let pick = picks[m.matchKey];
+            if (!isRealKey(pick) && ci != null) pick = picks['__inf_' + ci + '_' + si];
             if (!isRealKey(pick)) { return; }            // leave winner as-is (likely null)
             if (!isPickable(m)) { return; }              // TBD/bye not pickable
             const side = sideForKey(m, pick);
@@ -243,7 +249,7 @@
             // Re-decide mode: reset non-official winner so a removed pick doesn't
             // linger. Trust mode (no picks): keep the encoded winner as-is.
             if (hasPicks && !hasOfficialWinner(c)) c.winner = null;
-            applyDecision(c);
+            applyDecision(c, 0, si);
             slots[0][si] = c;
         });
 
@@ -280,7 +286,7 @@
                     if (base.winner === 'player1' && !(wA && String(wA.key) === String(base.player1Key))) base.winner = null;
                     if (base.winner === 'player2' && !(wB && String(wB.key) === String(base.player2Key))) base.winner = null;
                 }
-                applyDecision(base);
+                applyDecision(base, ri, si);
                 slots[ri][si] = base;
             }
         }
@@ -318,16 +324,32 @@
         }
 
         const next = {};
-        for (const slotId of Object.keys(picks)) {
+        // Real-key picks are processed before positional aliases so the
+        // "first write wins" guard below gives them precedence.
+        const orderedIds = Object.keys(picks).sort(function (a, b) {
+            return (a.indexOf('__inf_') === 0 ? 1 : 0) - (b.indexOf('__inf_') === 0 ? 1 : 0);
+        });
+        for (const slotId of orderedIds) {
             const winnerKey = picks[slotId];
             if (!isRealKey(winnerKey)) continue;
-            const m = resolvedByKey.get(String(slotId));
+            let m = resolvedByKey.get(String(slotId));
+            let storeKey = String(slotId);
+            // Migration: a positional '__inf_{col}_{slot}' pick whose round has since
+            // materialized re-keys to the real matchKey now sitting in that slot.
+            if (!m) {
+                const im = /^__inf_(\d+)_(\d+)$/.exec(String(slotId));
+                if (im) {
+                    const cand = (slots[Number(im[1])] || [])[Number(im[2])];
+                    if (cand && isRealKey(cand.matchKey)) { m = cand; storeKey = String(cand.matchKey); }
+                }
+            }
             if (!m) continue;                          // match no longer in draw → drop
             if (isFinished(m)) continue;               // truth beats pick → drop
             if (!isPickable(m)) continue;              // TBD/bye now → drop
             const side = sideForKey(m, winnerKey);
             if (!side) continue;                       // ghost: player not in slot → drop
-            next[slotId] = String(winnerKey);
+            if (next[storeKey] !== undefined) continue; // real-key pick wins over migrated alias
+            next[storeKey] = String(winnerKey);
         }
         return next;
     }

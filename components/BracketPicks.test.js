@@ -239,3 +239,48 @@ test('depth-bounded: duplicate/glitch keys do not infinite-loop', () => {
     assert.doesNotThrow(() => { slots = BP.resolveAdvancement(BP.derivePickedDraw(draw, { '10': 'A' })); });
     assert.ok(Array.isArray(slots), 'resolves without hanging');
 });
+
+// ── Materialization: positional picks survive draw growth ────────────────────
+// Pre-tournament the API delivers only the first round; later-round picks are
+// stored under '__inf_{col}_{slot}'. When the API later delivers that round
+// with real matchKeys, the pick must still render and pruneInvalid must
+// migrate it to the real key.
+
+function fourPlayerDrawWithRealFinal() {
+    // Same draw, but SF matches are Finished (A and C won) and the Final now
+    // EXISTS officially with matchKey '100' populated by the API.
+    return [
+        { round: 'Final', matches: [
+            { matchKey: '100', roundId: 12, status: 'Not Started', winner: null,
+              player1Key: 'A', player1Name: 'Player A', player2Key: 'C', player2Name: 'Player C' },
+        ]},
+        { round: 'Semifinals', matches: [
+            { matchKey: '10', roundId: 10, status: 'Finished', winner: 'player1',
+              player1Key: 'A', player1Name: 'Player A', player2Key: 'B', player2Name: 'Player B' },
+            { matchKey: '11', roundId: 10, status: 'Finished', winner: 'player1',
+              player1Key: 'C', player1Name: 'Player C', player2Key: 'D', player2Name: 'Player D' },
+        ]},
+    ];
+}
+
+test('positional __inf pick still decides the match after the round materializes', () => {
+    // Pick was made pre-tournament: final = column 1, slot 0 → '__inf_1_0'.
+    const picks = { '10': 'A', '11': 'C', '__inf_1_0': 'A' };
+    const slots = BP.resolveAdvancement(fourPlayerDrawWithRealFinal(), picks);
+    const finalMatch = slots[slots.length - 1][0];
+    assert.strictEqual(String(finalMatch.matchKey), '100', 'final is the real API match');
+    assert.strictEqual(finalMatch.winner, 'player1', 'old positional pick (A) still applies');
+});
+
+test('pruneInvalid migrates a positional pick to the real matchKey', () => {
+    const picks = { '__inf_1_0': 'A' };
+    const pruned = BP.pruneInvalid(picks, fourPlayerDrawWithRealFinal());
+    assert.strictEqual(pruned['100'], 'A', 'pick re-keyed to the real final matchKey');
+    assert.strictEqual(pruned['__inf_1_0'], undefined, 'positional alias removed');
+});
+
+test('real-key pick beats a stale positional alias for the same slot', () => {
+    const picks = { '100': 'C', '__inf_1_0': 'A' };
+    const pruned = BP.pruneInvalid(picks, fourPlayerDrawWithRealFinal());
+    assert.strictEqual(pruned['100'], 'C', 'explicit real-key pick wins');
+});

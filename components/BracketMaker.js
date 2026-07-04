@@ -1,9 +1,10 @@
 // ===================================
 // TennisWorld — Bracket Maker (interactive pick-mode controller)
 // ===================================
-// Wires the "Official Draw | My Picks" toggle, click-to-pick interaction, the
-// "Fill with model" button, and save/load/manage — on top of the UNCHANGED
-// TW.DrawBracket renderer.
+// Wires the "Official Draw | My Picks" toggle, click-to-pick interaction,
+// save-to-account + local copies, the per-tournament Leaders board with
+// read-only compare view, and the pick insights (progress + success
+// probability) — on top of the UNCHANGED TW.DrawBracket renderer.
 //
 // Architecture (LOAD-BEARING, per advisor gate):
 //   TW.DrawBracket is a PURE function of its draw input. So pick-mode renders
@@ -29,7 +30,6 @@ window.TW = window.TW || {};
 
     function BP() { return window.TW.BracketPicks; }
     function Store() { return window.TW.BracketStore; }
-    function Autofill() { return window.TW.BracketAutofill; }
 
     // Active controller (single draw open at a time). Lets us tear down listeners.
     let active = null;
@@ -58,8 +58,8 @@ window.TW = window.TW || {};
 
         const pickStore = window.TW.createStore({ picks: picks });
         let mode = store.getMode(tk); // 'official' | 'picks'
-        let fillToken = 0;            // stale-guard token bumped on every user pick
-        let filling = false;
+        let changeToken = 0;          // stale-guard token bumped on every pick change
+        let viewing = null;           // { name, picks, matches, score, maxPossible } — read-only view of another user's bracket
 
         const ctx = {
             cfg: cfg, tk: tk, drawId: drawId, store: store, bp: bp,
@@ -79,7 +79,7 @@ window.TW = window.TW || {};
         function currentPicks() { return pickStore.getState().picks; }
 
         function setPicks(next) {
-            fillToken++; // any pick change invalidates an in-flight fill commit
+            changeToken++; // any pick change invalidates in-flight async work
             pickStore.setState({ picks: next });
             // Persist working state (try/catch lives in BracketStore).
             store.setWorking(tk, next, drawId);
@@ -94,6 +94,15 @@ window.TW = window.TW || {};
 
         // ── Core render ──────────────────────────────────────────────────────
         function renderNow() {
+            // Read-only view of someone else's bracket (from Leaders). Rendered
+            // through the SAME derive-only path — official data never mutated.
+            if (viewing) {
+                cfg.renderBracket(bp.derivePickedDraw(cfg.officialDraw, viewing.picks), 'official');
+                if (cfg.wrapEl) cfg.wrapEl.classList.remove('bm-pickmode');
+                controls.syncViewing(viewing);
+                return;
+            }
+            controls.syncViewing(null);
             const draw = (mode === 'picks')
                 ? bp.derivePickedDraw(cfg.officialDraw, currentPicks())
                 : cfg.officialDraw;
@@ -101,10 +110,62 @@ window.TW = window.TW || {};
             cfg.renderBracket(draw, mode);
             if (mode === 'picks') {
                 decorate();
+                updateInsights();
             } else if (cfg.wrapEl) {
                 cfg.wrapEl.classList.remove('bm-pickmode'); // drop pick-mode styling hook
             }
             controls.syncChampion(bp.championKey(cfg.officialDraw, currentPicks()), cfg);
+        }
+
+        // ── Insights: progress counter + success-probability bar ──────────────
+        // Progress: picked / still-open matches in the full tree.
+        // Success probability: mean model probability of each picked winner
+        // (memoized /api/predict via TW.ProbBar) — an "agreement with the model"
+        // aggregate, NOT a path product (which would be astronomically small).
+        async function updateInsights() {
+            const token = ++changeToken;
+            const slots = bp.resolveAdvancement(cfg.officialDraw, currentPicks());
+            let open = 0, picked = 0;
+            const pickedMatches = [];
+            slots.forEach(function (col) {
+                col.forEach(function (m) {
+                    if (!m) return;
+                    if (bp.hasOfficialWinner(m)) return; // decided by real result
+                    open++;
+                    if (m.winner === 'player1' || m.winner === 'player2') {
+                        picked++;
+                        if (bp.isRealKey(m.player1Key) && bp.isRealKey(m.player2Key)) pickedMatches.push(m);
+                    }
+                });
+            });
+            controls.syncProgress(picked, open);
+
+            if (!pickedMatches.length || typeof TW === 'undefined' || !TW.ProbBar || !TW.ProbBar.fetchPrediction) {
+                controls.syncConfidence(null, 0);
+                return;
+            }
+            let sum = 0, n = 0, i = 0;
+            async function worker() {
+                while (i < pickedMatches.length) {
+                    const m = pickedMatches[i++];
+                    try {
+                        const pred = await TW.ProbBar.fetchPrediction({
+                            player1Key: m.player1Key, player2Key: m.player2Key,
+                            player1Name: m.player1Name, player2Name: m.player2Name,
+                            tour: cfg.tour || 'ATP',
+                        });
+                        if (changeToken !== token) return; // stale — newer picks exist
+                        if (pred && typeof pred.probA === 'number') {
+                            sum += (m.winner === 'player1') ? pred.probA : pred.probB;
+                            n++;
+                        }
+                    } catch (_) { /* graceful absence */ }
+                }
+            }
+            await Promise.all(Array.from({ length: Math.min(4, pickedMatches.length) }, worker));
+            if (changeToken === token) {
+                controls.syncConfidence(n ? Math.round((sum / n) * 100) : null, n);
+            }
         }
 
         // ── Decoration layer (pick-mode only) ──────────────────────────────────
@@ -178,35 +239,70 @@ window.TW = window.TW || {};
             });
         }
 
-        // ── Auto-fill ──────────────────────────────────────────────────────────
-        async function runFill() {
-            const af = Autofill();
-            if (!af || filling) return;
-            filling = true;
-            controls.setFillBusy(true);
-            const myToken = ++fillToken;
-            try {
-                const res = await af.fill(cfg.officialDraw, currentPicks(), {
-                    tour: cfg.tour,
-                    surface: cfg.surface || '',
-                    concurrency: 4,
-                    token: myToken,
-                    getToken: function () { return fillToken; },
-                });
-                if (!res.aborted) {
-                    pickStore.setState({ picks: res.picks });
-                    store.setWorking(tk, res.picks, drawId);
-                }
-                controls.flashStatus(res.aborted
-                    ? 'Fill canceled'
-                    : 'Filled ' + res.filled + (res.skipped ? ' · ' + res.skipped + ' skipped' : ''));
-            } catch (e) {
-                controls.flashStatus('Fill failed');
-                console.warn('[BracketMaker] fill error', e);
-            } finally {
-                filling = false;
-                controls.setFillBusy(false);
+        // ── Save to account (server bracket — one active per tournament) ──────
+        async function saveToAccount() {
+            if (!(window.TW.auth && TW.auth.isLoggedIn)) {
+                controls.flashStatus('Sign in to save your bracket');
+                if (window.TW.auth && TW.auth.openModal) TW.auth.openModal('signin');
+                return;
             }
+            const pruned = bp.pruneInvalid(currentPicks(), cfg.officialDraw);
+            if (!Object.keys(pruned).length) {
+                controls.flashStatus('Make some picks first');
+                return;
+            }
+            controls.setAccountBusy(true);
+            try {
+                await apiFetch('/api/bracket/save', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        tour: cfg.tour || 'ATP',
+                        tournamentKey: tk,
+                        season: String(cfg.year || ''),
+                        tournamentName: cfg.tournamentName || '',
+                        picks: pruned,
+                    }),
+                });
+                controls.flashStatus('Bracket saved! See how you rank under Leaders.');
+            } catch (e) {
+                controls.flashStatus('Save failed — try again');
+                console.warn('[BracketMaker] account save error', e);
+            } finally {
+                controls.setAccountBusy(false);
+            }
+        }
+
+        // ── Leaders (per-tournament leaderboard) + read-only compare view ─────
+        async function loadLeaders() {
+            const qs = 'tournamentKey=' + encodeURIComponent(tk) + '&tour=' + encodeURIComponent(cfg.tour || 'ATP');
+            return apiFetch('/api/bracket/leaders?' + qs);
+        }
+
+        async function viewBracket(entry) {
+            try {
+                const qs = 'id=' + encodeURIComponent(entry.publicId) +
+                    '&tournamentKey=' + encodeURIComponent(tk) + '&tour=' + encodeURIComponent(cfg.tour || 'ATP');
+                const data = await apiFetch('/api/bracket/public?' + qs);
+                const mine = currentPicks();
+                let matches = 0;
+                for (const k of Object.keys(data.picks || {})) {
+                    if (mine[k] !== undefined && String(mine[k]) === String(data.picks[k])) matches++;
+                }
+                viewing = {
+                    name: data.displayName || 'Player',
+                    picks: data.picks || {},
+                    matches: matches,
+                    score: data.score, maxPossible: data.maxPossible,
+                };
+                renderNow();
+            } catch (e) {
+                controls.flashStatus('Could not load that bracket');
+            }
+        }
+
+        function exitViewing() {
+            viewing = null;
+            renderNow();
         }
 
         function clearPicks() {
@@ -236,8 +332,10 @@ window.TW = window.TW || {};
 
         // Expose actions to the controls closure.
         ctx.actions = {
-            runFill: runFill, clearPicks: clearPicks, saveAs: saveAs,
+            clearPicks: clearPicks, saveAs: saveAs,
             loadSaved: loadSaved, currentPicks: currentPicks,
+            saveToAccount: saveToAccount, loadLeaders: loadLeaders,
+            viewBracket: viewBracket, exitViewing: exitViewing,
         };
         controls.bindActions(ctx.actions);
 
@@ -282,8 +380,9 @@ window.TW = window.TW || {};
         // No host (e.g. RR draw) → no controls, but pick logic still works headless.
         const noop = {
             syncMode: function () {}, syncChampion: function () {},
-            setFillBusy: function () {}, flashStatus: function () {},
-            bindActions: function () {}, el: null,
+            syncProgress: function () {}, syncConfidence: function () {},
+            setAccountBusy: function () {}, syncViewing: function () {},
+            flashStatus: function () {}, bindActions: function () {}, el: null,
         };
         if (!host) return noop;
 
@@ -306,25 +405,58 @@ window.TW = window.TW || {};
         // Pick-mode action group (hidden in official mode).
         const actions = document.createElement('div');
         actions.className = 'bm-actions';
-        const btnFill = mkBtn('Fill with model', 'bm-btn bm-btn-primary');
-        const btnSave = mkBtn('Save', 'bm-btn');
+        const btnAccount = mkBtn('Save to My Account', 'bm-btn bm-btn-primary');
+        const btnSave = mkBtn('Save Copy', 'bm-btn');
         const btnManage = mkBtn('My Brackets', 'bm-btn');
         const btnClear = mkBtn('Reset', 'bm-btn bm-btn-ghost');
-        actions.appendChild(btnFill);
+        actions.appendChild(btnAccount);
         actions.appendChild(btnSave);
         actions.appendChild(btnManage);
         actions.appendChild(btnClear);
         bar.appendChild(actions);
+
+        // Leaders is visible in BOTH modes — the leaderboard is a first-class tab.
+        const btnLeaders = mkBtn('Leaders', 'bm-btn bm-btn-leaders');
+        bar.appendChild(btnLeaders);
 
         const status = document.createElement('span');
         status.className = 'bm-status';
         status.setAttribute('role', 'status');
         bar.appendChild(status);
 
+        // Insights row (pick mode): progress counter + success-probability bar.
+        const insights = document.createElement('div');
+        insights.className = 'bm-insights';
+        insights.hidden = true;
+        const progress = document.createElement('span');
+        progress.className = 'bm-progress';
+        const conf = document.createElement('div');
+        conf.className = 'bm-conf';
+        conf.title = 'Average model win probability of your picked winners — based on rankings, surface record, and head-to-head. For entertainment purposes.';
+        conf.innerHTML =
+            '<span class="bm-conf-label"></span>' +
+            '<span class="bm-conf-track"><span class="bm-conf-fill" style="width:0%"></span></span>';
+        conf.hidden = true;
+        insights.appendChild(progress);
+        insights.appendChild(conf);
+        bar.appendChild(insights);
+
         const champ = document.createElement('div');
         champ.className = 'bm-champion';
         champ.hidden = true;
         bar.appendChild(champ);
+
+        // Read-only "viewing someone else's bracket" banner.
+        const viewBanner = document.createElement('div');
+        viewBanner.className = 'bm-viewbanner';
+        viewBanner.hidden = true;
+        bar.appendChild(viewBanner);
+
+        // Leaders panel (lazy-rendered).
+        const leadersPanel = document.createElement('div');
+        leadersPanel.className = 'bm-panel bm-leaders';
+        leadersPanel.hidden = true;
+        bar.appendChild(leadersPanel);
 
         // Management panel (saved brackets list) — built on demand.
         const panel = document.createElement('div');
@@ -347,7 +479,85 @@ window.TW = window.TW || {};
             btnPicks.classList.toggle('active', isPicks);
             btnOfficial.classList.toggle('active', !isPicks);
             actions.style.display = isPicks ? '' : 'none';
+            insights.hidden = !isPicks;
             if (!isPicks) { panel.hidden = true; champ.hidden = true; }
+        }
+
+        function syncProgress(picked, open) {
+            progress.textContent = open ? picked + '/' + open + ' picked' : '';
+        }
+
+        function syncConfidence(pct, n) {
+            if (pct == null || !n) { conf.hidden = true; return; }
+            conf.hidden = false;
+            conf.querySelector('.bm-conf-label').textContent =
+                'Your Bracket Success Probability: ' + pct + '%';
+            conf.querySelector('.bm-conf-fill').style.width = pct + '%';
+            conf.setAttribute('aria-label',
+                'Your bracket success probability ' + pct + ' percent, averaged across ' + n + ' picks. For entertainment purposes.');
+        }
+
+        function setAccountBusy(busy) {
+            btnAccount.disabled = busy;
+            btnAccount.textContent = busy ? 'Saving…' : 'Save to My Account';
+        }
+
+        function syncViewing(v) {
+            if (!v) { viewBanner.hidden = true; viewBanner.innerHTML = ''; return; }
+            viewBanner.hidden = false;
+            const scoreBit = (v.score != null)
+                ? ' · ' + v.score + ' pts (max ' + v.maxPossible + ')' : '';
+            viewBanner.innerHTML =
+                'Viewing <strong>' + escapeHtml(v.name) + '</strong>’s bracket' + scoreBit +
+                ' · ' + v.matches + ' of your picks match ' +
+                '<button type="button" class="bm-mini bm-view-back">Back to my bracket</button>';
+            viewBanner.querySelector('.bm-view-back').onclick = function () { A.exitViewing(); };
+            leadersPanel.hidden = true;
+        }
+
+        function renderLeaders(data) {
+            leadersPanel.innerHTML = '';
+            const title = document.createElement('div');
+            title.className = 'bm-panel-title';
+            title.textContent = 'Bracket Leaders';
+            leadersPanel.appendChild(title);
+
+            const entries = (data && data.entries) || [];
+            if (!entries.length) {
+                const empty = document.createElement('div');
+                empty.className = 'bm-panel-empty';
+                empty.textContent = 'No brackets yet — be the first! Make your picks and Save to My Account.';
+                leadersPanel.appendChild(empty);
+                return;
+            }
+            const table = document.createElement('table');
+            table.className = 'bm-leaders-table';
+            table.innerHTML = '<thead><tr>' +
+                '<th>#</th><th>Player</th><th>Score</th><th>Max</th><th>Accuracy</th><th></th>' +
+                '</tr></thead>';
+            const tbody = document.createElement('tbody');
+            entries.forEach(function (e) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = '<td>' + e.rank + '</td>' +
+                    '<td>' + escapeHtml(e.displayName || 'Player') + '</td>' +
+                    '<td><strong>' + e.score + '</strong></td>' +
+                    '<td>' + e.maxPossible + '</td>' +
+                    '<td>' + (e.accuracy == null ? '—' : e.accuracy + '%') + '</td>';
+                const td = document.createElement('td');
+                const view = mkBtn('View', 'bm-mini');
+                view.onclick = function () { A.viewBracket(e); };
+                td.appendChild(view);
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+            leadersPanel.appendChild(table);
+            if (data.total > entries.length) {
+                const more = document.createElement('div');
+                more.className = 'bm-panel-empty';
+                more.textContent = 'Top ' + entries.length + ' of ' + data.total + ' brackets.';
+                leadersPanel.appendChild(more);
+            }
         }
 
         function syncChampion(championKey, cfg) {
@@ -356,11 +566,6 @@ window.TW = window.TW || {};
             champ.hidden = false;
             champ.innerHTML = '<span class="bm-champ-star">★</span> Champion: <strong>' +
                 escapeHtml(name) + '</strong>';
-        }
-
-        function setFillBusy(busy) {
-            btnFill.disabled = busy;
-            btnFill.textContent = busy ? 'Filling…' : 'Fill with model';
         }
 
         function renderPanel(cfg) {
@@ -407,17 +612,30 @@ window.TW = window.TW || {};
 
         function bindActions(actionsObj) {
             A = actionsObj;
-            btnFill.onclick = function () { A.runFill(); };
+            btnAccount.onclick = function () { A.saveToAccount(); };
             btnSave.onclick = function () {
-                const name = window.prompt('Name this bracket', 'My Bracket');
+                const name = window.prompt('Name this bracket copy', 'My Bracket');
                 if (name && name.trim()) {
                     A.saveAs(name.trim());
-                    flashStatus('Saved');
+                    flashStatus('Copy saved locally');
                 }
             };
             btnManage.onclick = function () {
-                if (panel.hidden) { renderPanel(ctx.cfg); panel.hidden = false; }
+                if (panel.hidden) { renderPanel(ctx.cfg); panel.hidden = false; leadersPanel.hidden = true; }
                 else panel.hidden = true;
+            };
+            btnLeaders.onclick = async function () {
+                if (!leadersPanel.hidden) { leadersPanel.hidden = true; return; }
+                panel.hidden = true;
+                leadersPanel.hidden = false;
+                leadersPanel.innerHTML = '<div class="bm-panel-title">Bracket Leaders</div>' +
+                    '<div class="bm-panel-empty">Loading…</div>';
+                try {
+                    renderLeaders(await A.loadLeaders());
+                } catch (e) {
+                    leadersPanel.innerHTML = '<div class="bm-panel-title">Bracket Leaders</div>' +
+                        '<div class="bm-panel-empty">Could not load the leaderboard. Try again.</div>';
+                }
             };
             btnClear.onclick = function () {
                 if (window.confirm('Reset all picks? Saved brackets are not affected.')) {
@@ -428,7 +646,9 @@ window.TW = window.TW || {};
         }
 
         return {
-            syncMode: syncMode, syncChampion: syncChampion, setFillBusy: setFillBusy,
+            syncMode: syncMode, syncChampion: syncChampion,
+            syncProgress: syncProgress, syncConfidence: syncConfidence,
+            setAccountBusy: setAccountBusy, syncViewing: syncViewing,
             flashStatus: flashStatus, bindActions: bindActions, el: bar,
         };
     }

@@ -43,6 +43,47 @@
         document.getElementById('editEmailDisplay').textContent = user.email;
 
         renderWatchlist(user.favorites || []);
+        loadMyBrackets();
+    }
+
+    // ── My Brackets (account-saved, scored server-side) ──────────────────────
+    let bracketsLoaded = false;
+    function loadMyBrackets() {
+        if (bracketsLoaded) return;
+        bracketsLoaded = true;
+        const wrap = document.getElementById('profileBrackets');
+        const count = document.getElementById('myBracketsCount');
+        if (!wrap) return;
+        wrap.innerHTML = '<p class="profile-watchlist-empty">Loading…</p>';
+        apiFetch('/api/bracket/mine').then(data => {
+            const brackets = (data && data.brackets) || [];
+            count.textContent = brackets.length
+                ? `${brackets.length} bracket${brackets.length !== 1 ? 's' : ''}` : '';
+            if (!brackets.length) {
+                wrap.innerHTML = '<p class="profile-watchlist-empty">' +
+                    'No brackets yet — open a tournament draw, switch to My Picks, and Save to My Account.</p>';
+                return;
+            }
+            wrap.innerHTML = brackets.map(b => {
+                const href = `draws.html?tournamentKey=${encodeURIComponent(b.tournamentKey)}` +
+                    `&season=${encodeURIComponent(b.season || '')}` +
+                    `&name=${encodeURIComponent(b.tournamentName || '')}` +
+                    `&tour=${encodeURIComponent(b.tour || 'ATP')}`;
+                const acc = b.accuracy == null ? '' : ` · ${b.accuracy}% accurate`;
+                return `<a class="profile-bracket-row" href="${href}">
+                    <span class="profile-bracket-name">${escapeText(b.tournamentName || b.tournamentKey)}</span>
+                    <span class="profile-bracket-meta">${b.score ?? 0} pts · max ${b.maxPossible ?? 0}${acc} · ${b.picksTotal ?? 0} picks</span>
+                </a>`;
+            }).join('');
+        }).catch(() => {
+            wrap.innerHTML = '<p class="profile-watchlist-empty">Could not load your brackets.</p>';
+        });
+    }
+
+    function escapeText(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     function renderWatchlist(favorites) {
