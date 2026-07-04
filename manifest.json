@@ -1,0 +1,33 @@
+{
+    "name": "TennisWorld",
+    "short_name": "TennisWorld",
+    "description": "Professional tennis scores, draws, rankings, and analytics",
+    "start_url": "/index.html",
+    "display": "standalone",
+    "background_color": "#0a0e14",
+    "theme_color": "#0a0e14",
+    "orientation": "portrait-primary",
+    "scope": "/",
+    "shortcuts": [
+        {
+            "name": "Live Scores",
+            "short_name": "Scores",
+            "description": "View live tennis scores",
+            "url": "/index.html"
+        },
+        {
+            "name": "Draws",
+            "short_name": "Draws",
+            "description": "Tournament draws and calendar",
+            "url": "/draws.html"
+        },
+        {
+            "name": "Rankings",
+            "short_name": "Rankings",
+            "description": "ATP and WTA world rankings",
+            "url": "/rankings.html"
+        }
+    ],
+    "categories": ["sports", "news"],
+    "lang": "en-US"
+}

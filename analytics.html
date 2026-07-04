@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TennisWorld — Tennis Analytics</title>
+    <meta name="description" content="Deep tennis analytics: surface splits, head-to-head, serve stats, Elo ratings, and match predictions.">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://tennisworld.dev/analytics.html">
+    <meta property="og:type"        content="website">
+    <meta property="og:url"         content="https://tennisworld.dev/analytics.html">
+    <meta property="og:title"       content="TennisWorld — Tennis Analytics">
+    <meta property="og:description" content="Deep tennis analytics: surface splits, head-to-head, serve stats, Elo ratings, and match predictions.">
+    <meta property="og:image"       content="https://tennisworld.dev/screenshots/scores.png">
+    <meta name="twitter:card"        content="summary_large_image">
+    <meta name="twitter:title"       content="TennisWorld — Tennis Analytics">
+    <meta name="twitter:description" content="Deep tennis analytics: surface splits, head-to-head, serve stats, Elo ratings, and match predictions.">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0a0e14">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <nav class="nav" id="mainNav">
+        <div class="nav-container">
+            <div class="nav-logo">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="16" cy="16" r="15" fill="#c9e94e"/>
+                        <path d="M7 8 C13 12, 13 20, 7 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round"/>
+                        <path d="M25 8 C19 12, 19 20, 25 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round"/>
+                    </svg>
+                </div>
+                <span class="logo-text">TennisWorld</span>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="index.html" class="nav-link">Scores</a></li>
+                <li><a href="draws.html" class="nav-link">Calendar</a></li>
+                <li><a href="rankings.html" class="nav-link">Rankings</a></li>
+                <li><a href="analytics.html" class="nav-link">Analytics</a></li>
+            </ul>
+            <button class="nav-theme-toggle" id="themeToggle" aria-label="Toggle dark mode">
+                <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                </svg>
+                <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                    <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                </svg>
+            </button>
+            <button class="nav-cta"><span>Sign In</span></button>
+        </div>
+    </nav>
+
+    <!-- Head to Head -->
+    <section class="analytics-section" id="h2hSection">
+        <div class="section-header" data-scroll-reveal>
+            <h2 class="section-title">Head to Head</h2>
+            <p class="section-subtitle">Search any two players — all-time meetings, surface splits &amp; full match history</p>
+        </div>
+
+        <div class="h2h-search-card analytics-card" data-scroll-reveal>
+            <div class="h2h-search-row">
+                <div class="h2h-picker">
+                    <input id="h2hInputA" class="h2h-input" type="text"
+                           placeholder="Player 1 — type to search"
+                           autocomplete="off" spellcheck="false" aria-label="Player 1">
+                    <div class="h2h-dropdown" id="h2hDropA" hidden></div>
+                </div>
+                <div class="h2h-vs-badge">vs</div>
+                <div class="h2h-picker">
+                    <input id="h2hInputB" class="h2h-input" type="text"
+                           placeholder="Player 2 — type to search"
+                           autocomplete="off" spellcheck="false" aria-label="Player 2">
+                    <div class="h2h-dropdown" id="h2hDropB" hidden></div>
+                </div>
+                <button class="h2h-compare-btn" id="h2hCompareBtn" disabled>Compare</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- H2H Modal -->
+    <div class="h2h-modal" id="h2hModal" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Head to head results">
+        <div class="h2h-modal-backdrop" id="h2hModalBackdrop"></div>
+        <div class="h2h-modal-dialog">
+            <button class="h2h-modal-close" id="h2hModalClose" aria-label="Close">&#x2715;</button>
+            <div class="h2h-modal-body" id="h2hModalContent"></div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-brand">
+                <div class="footer-logo">
+                    <div class="logo-icon">
+                        <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="16" cy="16" r="15" fill="#c9e94e"/>
+                        <path d="M7 8 C13 12, 13 20, 7 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round"/>
+                        <path d="M25 8 C19 12, 19 20, 25 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round"/>
+                    </svg>
+                    </div>
+                    <span>TennisWorld</span>
+                </div>
+                <p>Professional tennis analytics for fans. Live data from <a href="https://api-tennis.com" target="_blank" rel="noopener">api-tennis.com</a>.</p>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>© 2026 TennisWorld. Data updated in real time.</p>
+        </div>
+    </footer>
+
+    <script src="shared.js"></script>
+    <script src="auth.js"></script>
+    <script src="player-panel.js"></script>
+    <script src="components/store.js"></script>
+    <script src="components/ProbBar.js"></script>
+    <script src="h2h.js"></script>
+</body>
+</html>
