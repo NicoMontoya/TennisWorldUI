@@ -200,8 +200,13 @@
             .sort(function (a, b) { return RID_TO_IDX[a] - RID_TO_IDX[b]; });
         if (!roundIds.length) return [];
 
+        // Slot order: server-stamped slotIndex is the single authority (official
+        // bracket order); matchKey is the fallback for pre-slotIndex data. This
+        // MUST match DrawBracket's comparator or advancement lands in the wrong
+        // rendered slot (the increment-4 iteration-3 bug).
+        const slotVal = function (m) { return m.slotIndex != null ? m.slotIndex : Number(m.matchKey); };
         for (const rid of roundIds) {
-            byRound[rid].sort(function (a, b) { return Number(a.matchKey) - Number(b.matchKey); });
+            byRound[rid].sort(function (a, b) { return slotVal(a) - slotVal(b); });
         }
 
         // Project the FULL bracket depth from the draw size, not just the rounds the
@@ -291,12 +296,14 @@
                         matchKey: (real[si] && isRealKey(real[si].matchKey))
                             ? real[si].matchKey : '__inf_' + ri + '_' + si,
                         roundId: rid,
+                        slotIndex: si,
                         status: 'Not Started',
                         winner: null,
                     }
                     : (real[si] ? Object.assign({}, real[si]) : {
                         matchKey: '__inf_' + ri + '_' + si,
                         roundId: rid,
+                        slotIndex: si,
                         status: 'Not Started',
                         winner: null,
                     });

@@ -359,6 +359,7 @@ window.TW = window.TW || {};
             loadSaved: loadSaved, currentPicks: currentPicks,
             saveToAccount: saveToAccount, loadLeaders: loadLeaders,
             viewBracket: viewBracket, exitViewing: exitViewing,
+            rerender: renderNow,
         };
         controls.bindActions(ctx.actions);
 
@@ -442,6 +443,17 @@ window.TW = window.TW || {};
         // Leaders is visible in BOTH modes — the leaderboard is a first-class tab.
         const btnLeaders = mkBtn('Leaders', 'bm-btn bm-btn-leaders');
         bar.appendChild(btnLeaders);
+
+        // Layout toggle (columns ⇄ circle) — visible in both modes.
+        function layoutPref() {
+            try { return localStorage.getItem('tw-bracket-layout') || 'columns'; } catch (_) { return 'columns'; }
+        }
+        const btnLayout = mkBtn('', 'bm-btn bm-btn-layout');
+        function syncLayoutLabel() {
+            btnLayout.textContent = layoutPref() === 'circle' ? '▦ Column View' : '◎ Circle View';
+        }
+        syncLayoutLabel();
+        bar.appendChild(btnLayout);
 
         const status = document.createElement('span');
         status.className = 'bm-status';
@@ -647,6 +659,14 @@ window.TW = window.TW || {};
 
         function bindActions(actionsObj) {
             A = actionsObj;
+            btnLayout.onclick = function () {
+                try {
+                    localStorage.setItem('tw-bracket-layout',
+                        layoutPref() === 'circle' ? 'columns' : 'circle');
+                } catch (_) {}
+                syncLayoutLabel();
+                A.rerender();
+            };
             btnAccount.onclick = function () { A.saveToAccount(); };
             btnSave.onclick = function () {
                 const name = window.prompt('Name this bracket copy', 'My Bracket');

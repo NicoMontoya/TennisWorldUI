@@ -350,3 +350,20 @@ test('non-scratch behavior unchanged: truth still beats picks in default mode', 
     const pruned = BP.pruneInvalid({ '10': 'B' }, playedDraw());
     assert.deepStrictEqual(pruned, {}, 'default mode drops picks on finished matches');
 });
+
+test('slotIndex is the slot authority: advancement follows it over matchKey order', () => {
+    // matchKey order: 10 < 11. Official bracket order (slotIndex): match 11 first.
+    const draw = [
+        { round: 'Semifinals', matches: [
+            { matchKey: '10', roundId: 10, slotIndex: 1, status: 'Not Started', winner: null,
+              player1Key: 'A', player1Name: 'Player A', player2Key: 'B', player2Name: 'Player B' },
+            { matchKey: '11', roundId: 10, slotIndex: 0, status: 'Not Started', winner: null,
+              player1Key: 'C', player1Name: 'Player C', player2Key: 'D', player2Name: 'Player D' },
+        ]},
+    ];
+    const slots = BP.resolveAdvancement(draw, { '10': 'A', '11': 'C' });
+    assert.strictEqual(String(slots[0][0].matchKey), '11', 'slot 0 = slotIndex 0 (match 11)');
+    const final = slots[1][0];
+    assert.strictEqual(String(final.player1Key), 'C', 'slotIndex-first winner is final p1');
+    assert.strictEqual(String(final.player2Key), 'A', 'slotIndex-second winner is final p2');
+});

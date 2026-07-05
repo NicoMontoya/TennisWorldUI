@@ -332,7 +332,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (typeof TW !== 'undefined' && TW.DrawBracket) {
             try {
-                const { el, mostActiveRid } = TW.DrawBracket(
+                // Layout preference: classic columns or the circular bracket
+                // (first round on the outer ring, final at the center).
+                let layout = 'columns';
+                try { layout = localStorage.getItem('tw-bracket-layout') || 'columns'; } catch (_) {}
+                const Renderer = (layout === 'circle' && TW.RadialBracket)
+                    ? TW.RadialBracket : TW.DrawBracket;
+                const { el, mostActiveRid } = Renderer(
                     drawToRender, currentDrawTour, currentDrawName, currentDrawYear
                 );
                 wrapEl.appendChild(el);

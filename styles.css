@@ -6053,3 +6053,26 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
 }
 .bm-pickmode .db-card.bm-hit::after  { content: '✓'; color: var(--positive, #3a9d5d); }
 .bm-pickmode .db-card.bm-miss::after { content: '✕'; color: var(--negative, #c0504d); }
+
+/* ── Radial (circle) bracket ─────────────────────────────────────────────── */
+.rb-scroll { overflow: auto; max-width: 100%; }
+.rb-outer { position: relative; margin: 0 auto; }
+.rb-svg { position: absolute; inset: 0; pointer-events: none; }
+.rb-line { stroke: var(--border); stroke-width: 1.2; }
+.rb-card {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    width: 96px;
+    overflow: visible;
+    border-radius: 8px;
+    z-index: 1;
+}
+.rb-card .db-prow { padding: 0.1rem 0.4rem; min-height: 15px; font-size: 0.68rem; flex: none; }
+.rb-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 76px; display: inline-block; cursor: pointer; }
+.rb-name-tbd { color: var(--text-muted); font-style: italic; cursor: default; }
+.rb-seed { font-size: 0.6rem; color: var(--text-muted); margin-right: 0.25rem; }
+.rb-center {
+    position: absolute; transform: translate(-50%, -50%);
+    font-size: 1.3rem; text-align: center; z-index: 2; white-space: nowrap;
+}
+.rb-center strong { font-size: 0.85rem; display: block; }

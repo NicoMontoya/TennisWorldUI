@@ -83,9 +83,12 @@ window.TW = window.TW || {};
             }
         }
 
-        // Sort each bucket by matchKey (ascending) for consistent slot assignment
+        // Sort each bucket into slot order. The server stamps `slotIndex`
+        // (official bracket order — single slot authority); matchKey is the
+        // fallback for pre-slotIndex cached data.
+        const slotVal = m => (m.slotIndex != null ? m.slotIndex : Number(m.matchKey));
         for (const rid of Object.keys(byRound)) {
-            byRound[rid].sort((a, b) => Number(a.matchKey) - Number(b.matchKey));
+            byRound[rid].sort((a, b) => slotVal(a) - slotVal(b));
         }
 
         // 2. Sort round IDs earliest → latest
