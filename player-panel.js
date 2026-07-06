@@ -203,6 +203,22 @@
         document.getElementById('playerPanelBody').innerHTML = renderSeed(seed);
         openDrawer();
 
+        // Deep link to the full profile page (carries seed data so the hero
+        // renders instantly even before the API responds).
+        const metaEl = document.getElementById('ppMeta');
+        if (metaEl) {
+            const qs = new URLSearchParams({ playerKey: playerKey, tour: tour });
+            if (name)     qs.set('name', name);
+            if (country)  qs.set('country', country);
+            if (rank)     qs.set('rank', rank);
+            if (birthday) qs.set('birthday', birthday);
+            const link = document.createElement('a');
+            link.className = 'pp-full-profile';
+            link.href = 'player.html?' + qs.toString();
+            link.textContent = 'Full profile →';
+            metaEl.appendChild(link);
+        }
+
         // Inject star button with full player data
         const starWrap = document.getElementById('ppStarWrap');
         if (starWrap && typeof TW !== 'undefined' && TW.auth) {
