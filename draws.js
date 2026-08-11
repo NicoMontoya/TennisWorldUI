@@ -669,12 +669,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     return riA - riB;
                 });
 
+                // Label tabs from the server's canonical roundId (authoritative
+                // depth), NOT the match count — a bye draw's round can be short
+                // (Montreal's R64 has 31 matches), and a count heuristic then
+                // mislabels it ("R32") and duplicates a tab.
+                const RID_SHORT = { 4:'R128', 5:'R64', 6:'R32', 7:'R16', 9:'QF', 10:'SF', 12:'F' };
                 sortedByEarliest.forEach((r) => {
                     if (!r.matches.length) return;
                     const rid = r.matches[0].roundId;
                     const n   = r.matches.length;
-                    const short = n >= 64 ? 'R128' : n >= 32 ? 'R64' : n >= 16 ? 'R32'
-                                : n >= 8  ? 'R16'  : n >= 4  ? 'QF'  : n >= 2  ? 'SF' : 'F';
+                    const short = RID_SHORT[rid] || (n >= 64 ? 'R128' : n >= 32 ? 'R64' : n >= 16 ? 'R32'
+                                : n >= 8  ? 'R16'  : n >= 4  ? 'QF'  : n >= 2  ? 'SF' : 'F');
                     const btn   = document.createElement('button');
                     btn.className   = 'round-tab';
                     btn.textContent = short;
