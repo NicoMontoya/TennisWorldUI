@@ -6644,3 +6644,199 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     white-space: nowrap;
 }
 .pp-full-profile:hover { text-decoration: underline; }
+
+/* ===================================
+   Home — Vintage Curves
+   =================================== */
+
+.vintage-section {
+    background: var(--bg-primary);
+    padding: 3rem 1.5rem 4rem;
+    min-height: 70vh;
+}
+
+.vintage-container {
+    max-width: 1080px;
+    margin: 0 auto;
+}
+
+.vintage-title {
+    font-family: var(--font-serif);
+    font-size: clamp(2rem, 4vw, 2.75rem);
+    font-weight: 500;
+    color: var(--text-primary);
+    margin: 0.25rem 0 0.5rem;
+}
+
+.vintage-sub {
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    color: var(--text-secondary);
+    max-width: 56ch;
+    margin: 0 0 1.5rem;
+}
+
+.vintage-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.metric-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--bg-card);
+}
+
+.metric-btn {
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: 0.4rem 0.9rem;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.metric-btn.active {
+    background: var(--text-primary);
+    color: var(--bg-card);
+    font-weight: 600;
+}
+
+.vintage-add {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.vintage-add input {
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    min-width: 180px;
+}
+
+.vintage-add input:focus {
+    outline: 2px solid var(--accent-dim);
+    border-color: var(--accent);
+}
+
+.vintage-reset {
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: 0.45rem 0.85rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.vintage-reset:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.vintage-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+    min-height: 1.9rem;
+}
+
+.player-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.25rem 0.35rem 0.25rem 0.6rem;
+    background: var(--bg-card);
+}
+
+.player-chip.is-loading { opacity: 0.55; }
+.player-chip.is-error   { opacity: 0.55; border-style: dashed; }
+
+.chip-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: none;
+}
+
+.chip-remove {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.3rem;
+    cursor: pointer;
+    border-radius: 50%;
+}
+
+.chip-remove:hover { color: var(--accent); }
+
+.vintage-chart-wrap {
+    position: relative;
+    height: 500px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1rem 0.75rem;
+}
+
+.vintage-note {
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin-top: 0.75rem;
+    min-height: 1.2em;
+}
+
+@media (max-width: 640px) {
+    .vintage-chart-wrap { height: 380px; }
+    .vintage-controls   { flex-direction: column; align-items: stretch; }
+    .vintage-add input  { flex: 1; }
+}
+
+/* ── Historical rankings (Time Machine) ──────────────────────────────────── */
+.ranking-mode-toggle { display: inline-flex; gap: 2px; background: color-mix(in srgb, var(--text-muted) 14%, transparent); border-radius: 8px; padding: 2px; margin-right: 0.6rem; }
+.ranking-mode-toggle .mode-btn {
+    border: none; background: transparent; color: var(--text-secondary);
+    font-size: 0.8rem; font-weight: 600; padding: 0.35rem 0.7rem; border-radius: 6px; cursor: pointer;
+}
+.ranking-mode-toggle .mode-btn.active { background: var(--bg-card, #fff); color: var(--text-primary); box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+
+.hist-controls { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0 1rem; }
+.hist-nav {
+    width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg-card, #fff); color: var(--text-primary); font-size: 1.1rem; cursor: pointer; line-height: 1;
+}
+.hist-nav:hover { border-color: var(--positive, #3a9d5d); }
+.hist-date { padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card, #fff); color: var(--text-primary); font-size: 0.85rem; }
+.hist-snap { font-size: 0.85rem; color: var(--text-secondary); font-weight: 600; }
+.hist-jump { display: inline-flex; gap: 0.3rem; flex-wrap: wrap; margin-left: auto; }
+.hist-chip { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 0.75rem; padding: 0.25rem 0.55rem; border-radius: 999px; cursor: pointer; }
+.hist-chip:hover { border-color: var(--positive, #3a9d5d); color: var(--text-primary); }
+.hist-table .col-country { color: var(--text-secondary); font-size: 0.82rem; }
+.hist-msg { text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.875rem; }
+@media (max-width: 560px) { .hist-jump { margin-left: 0; width: 100%; } }
