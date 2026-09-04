@@ -129,21 +129,19 @@
         const actionsEl = document.getElementById('heroActions');
         if (!actionsEl || !seed) return;
 
-        if (typeof TW === 'undefined' || !TW.auth) {
-            actionsEl.innerHTML = '';
-            return;
-        }
+        actionsEl.replaceChildren();
+        if (typeof TW === 'undefined' || !TW.auth) return;
 
         const starred = TW.auth.isFavorite(seed.playerKey);
-        actionsEl.innerHTML = `
-            <button class="star-btn hero-star${starred ? ' starred' : ''}"
-                data-player-key="${seed.playerKey}"
-                data-name="${seed.name}"
-                data-country="${seed.country}"
-                data-tour="${seed.tour}"
-                aria-label="${starred ? 'Remove from' : 'Add to'} watch list">
-                ${starred ? '★' : '☆'} ${starred ? 'Watching' : 'Watch'}
-            </button>`;
+        const btn = document.createElement('button');
+        btn.className = 'star-btn hero-star' + (starred ? ' starred' : '');
+        btn.dataset.playerKey = String(seed.playerKey ?? '');
+        btn.dataset.name = seed.name || '';
+        btn.dataset.country = seed.country || '';
+        btn.dataset.tour = seed.tour || '';
+        btn.setAttribute('aria-label', starred ? 'Remove from watch list' : 'Add to watch list');
+        btn.textContent = (starred ? '★' : '☆') + ' ' + (starred ? 'Watching' : 'Watch');
+        actionsEl.appendChild(btn);
         TW.auth.bindStarButtons(actionsEl);
     }
 

@@ -8,7 +8,7 @@
 //
 // Bump CACHE_VERSION to force all clients to re-install.
 
-const CACHE_VERSION  = 'tw-v33';
+const CACHE_VERSION  = 'tw-v34';
 const SHELL_CACHE    = CACHE_VERSION + '-shell';
 const API_CACHE      = CACHE_VERSION + '-api';
 

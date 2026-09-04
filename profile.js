@@ -71,7 +71,7 @@
                     `&tour=${encodeURIComponent(b.tour || 'ATP')}`;
                 const acc = b.accuracy == null ? '' : ` · ${b.accuracy}% accurate`;
                 return `<a class="profile-bracket-row" href="${href}">
-                    <span class="profile-bracket-name">${escapeText(b.tournamentName || b.tournamentKey)}</span>
+                    <span class="profile-bracket-name">${escapeHtml(b.tournamentName || b.tournamentKey)}</span>
                     <span class="profile-bracket-meta">${b.score ?? 0} pts · max ${b.maxPossible ?? 0}${acc} · ${b.picksTotal ?? 0} picks</span>
                 </a>`;
             }).join('');
@@ -80,32 +80,56 @@
         });
     }
 
-    function escapeText(s) {
-        return String(s == null ? '' : s)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-
     function renderWatchlist(favorites) {
         const wrap  = document.getElementById('profileWatchlist');
         const count = document.getElementById('watchlistCount');
         count.textContent = favorites.length ? `${favorites.length} player${favorites.length !== 1 ? 's' : ''}` : '';
 
+        wrap.replaceChildren();
         if (!favorites.length) {
-            wrap.innerHTML = '<p class="profile-watchlist-empty">Star players in Rankings or on their profile to add them here.</p>';
+            const empty = document.createElement('p');
+            empty.className = 'profile-watchlist-empty';
+            empty.textContent = 'Star players in Rankings or on their profile to add them here.';
+            wrap.appendChild(empty);
             return;
         }
 
-        wrap.innerHTML = favorites.map(p => `
-            <div class="profile-watchlist-row" data-player-key="${p.playerKey}"
-                 data-tour="${p.tour}" data-name="${p.name}" data-country="${p.country}">
-                <span class="watchlist-flag">${typeof flag === 'function' ? flag(p.country) : ''}</span>
-                <span class="profile-watchlist-name" data-open-player>${p.name}</span>
-                <span class="profile-watchlist-tour">${p.tour}</span>
-                <button class="star-btn starred" data-player-key="${p.playerKey}"
-                        data-name="${p.name}" data-country="${p.country}" data-tour="${p.tour}"
-                        aria-label="Remove from watch list">★</button>
-            </div>`).join('');
+        favorites.forEach(p => {
+            const row = document.createElement('div');
+            row.className = 'profile-watchlist-row';
+            row.dataset.playerKey = String(p.playerKey ?? '');
+            row.dataset.tour = p.tour || '';
+            row.dataset.name = p.name || '';
+            row.dataset.country = p.country || '';
+
+            const flagEl = document.createElement('span');
+            flagEl.className = 'watchlist-flag';
+            flagEl.textContent = typeof flag === 'function' ? flag(p.country) : '';
+            row.appendChild(flagEl);
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'profile-watchlist-name';
+            nameEl.setAttribute('data-open-player', '');
+            nameEl.textContent = p.name || '';
+            row.appendChild(nameEl);
+
+            const tourEl = document.createElement('span');
+            tourEl.className = 'profile-watchlist-tour';
+            tourEl.textContent = p.tour || '';
+            row.appendChild(tourEl);
+
+            const btn = document.createElement('button');
+            btn.className = 'star-btn starred';
+            btn.dataset.playerKey = String(p.playerKey ?? '');
+            btn.dataset.name = p.name || '';
+            btn.dataset.country = p.country || '';
+            btn.dataset.tour = p.tour || '';
+            btn.setAttribute('aria-label', 'Remove from watch list');
+            btn.textContent = '★';
+            row.appendChild(btn);
+
+            wrap.appendChild(row);
+        });
 
         if (typeof TW !== 'undefined' && TW.auth) {
             TW.auth.bindStarButtons(wrap);
@@ -247,7 +271,7 @@
             window.location.href = 'index.html';
         });
         document.getElementById('profileSigninBtn')?.addEventListener('click', () => {
-            window.location.href = 'index.html';
+            if (typeof TW !== 'undefined' && TW.auth) TW.auth.openModal('signin');
         });
     }
 
@@ -260,7 +284,13 @@
             window.location.href = 'index.html';
             return;
         }
-        renderWatchlist(user.favorites || []);
+        const content = document.getElementById('profileContent');
+        if (content && content.style.display !== 'none') {
+            renderWatchlist(user.favorites || []);
+        } else {
+            // Signed in from the unauthenticated profile gate
+            renderProfile(user);
+        }
     });
 
     // ── Init ──────────────────────────────────────────────────────────────────

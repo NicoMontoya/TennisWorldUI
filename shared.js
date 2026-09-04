@@ -93,6 +93,16 @@ function flag(country) {
     return COUNTRY_FLAGS[country] || '🏳';
 }
 
+// Escape user-controlled strings before interpolating into HTML.
+// Prefer textContent / dataset / createElement; use this when an HTML string is unavoidable.
+function escapeHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 // ── Tennis score formatting ────────────────────────────────────────────────
 
 // Format a single set: "6-1", or "7-6(5)" when there was a tiebreak

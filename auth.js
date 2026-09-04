@@ -209,13 +209,15 @@
         if (!btn) return;
 
         if (currentUser) {
-            const initials = (currentUser.firstName[0] + currentUser.lastName[0]).toUpperCase();
+            const initials = ((currentUser.firstName?.[0] || '') + (currentUser.lastName?.[0] || '')).toUpperCase();
             btn.innerHTML = `
-                <span class="nav-user-avatar">${initials}</span>
-                <span class="nav-user-name">${currentUser.firstName}</span>
+                <span class="nav-user-avatar"></span>
+                <span class="nav-user-name"></span>
                 <svg class="nav-user-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M4 6l4 4 4-4"/>
                 </svg>`;
+            btn.querySelector('.nav-user-avatar').textContent = initials;
+            btn.querySelector('.nav-user-name').textContent = currentUser.firstName || '';
             btn.onclick = toggleUserMenu;
         } else {
             btn.innerHTML = '<span>Sign In</span>';
@@ -234,14 +236,17 @@
         menu.className = 'user-menu';
         menu.innerHTML = `
             <a class="user-menu-header user-menu-profile-link" href="profile.html">
-                <div class="user-menu-name">${currentUser.firstName} ${currentUser.lastName}</div>
-                <div class="user-menu-email">${currentUser.email}</div>
+                <div class="user-menu-name"></div>
+                <div class="user-menu-email"></div>
                 <div class="user-menu-view-profile">View profile →</div>
             </a>
             <hr class="user-menu-divider">
             <button class="user-menu-item" id="userMenuWatchlist">Watch List</button>
             <hr class="user-menu-divider">
             <button class="user-menu-item user-menu-signout" id="userMenuSignout">Sign Out</button>`;
+        menu.querySelector('.user-menu-name').textContent =
+            `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim();
+        menu.querySelector('.user-menu-email').textContent = currentUser.email || '';
 
         menu.style.top   = (rect.bottom + 8) + 'px';
         menu.style.right = (window.innerWidth - rect.right) + 'px';
@@ -290,25 +295,46 @@
         panel = document.getElementById('watchlistPanel');
 
         const body = document.getElementById('watchlistBody');
+        body.replaceChildren();
         if (!favorites.length) {
-            body.innerHTML = '<p class="watchlist-empty">Star players in the Rankings or on their profile to add them here.</p>';
+            const empty = document.createElement('p');
+            empty.className = 'watchlist-empty';
+            empty.textContent = 'Star players in the Rankings or on their profile to add them here.';
+            body.appendChild(empty);
         } else {
-            body.innerHTML = favorites.map(p => `
-                <div class="watchlist-row">
-                    <span class="watchlist-flag">${flag(p.country)}</span>
-                    <span class="watchlist-name">${p.name}</span>
-                    <span class="watchlist-tour">${p.tour}</span>
-                    <button class="watchlist-remove star-btn starred" data-player-key="${p.playerKey}" aria-label="Remove from watch list">★</button>
-                </div>`).join('');
+            favorites.forEach(p => {
+                const row = document.createElement('div');
+                row.className = 'watchlist-row';
 
-            body.querySelectorAll('.watchlist-remove').forEach(btn => {
+                const flagEl = document.createElement('span');
+                flagEl.className = 'watchlist-flag';
+                flagEl.textContent = flag(p.country);
+                row.appendChild(flagEl);
+
+                const nameEl = document.createElement('span');
+                nameEl.className = 'watchlist-name';
+                nameEl.textContent = p.name || '';
+                row.appendChild(nameEl);
+
+                const tourEl = document.createElement('span');
+                tourEl.className = 'watchlist-tour';
+                tourEl.textContent = p.tour || '';
+                row.appendChild(tourEl);
+
+                const btn = document.createElement('button');
+                btn.className = 'watchlist-remove star-btn starred';
+                btn.dataset.playerKey = String(p.playerKey ?? '');
+                btn.setAttribute('aria-label', 'Remove from watch list');
+                btn.textContent = '★';
                 btn.addEventListener('click', async () => {
                     const pk = btn.dataset.playerKey;
-                    const player = favorites.find(f => f.playerKey === pk);
+                    const player = favorites.find(f => String(f.playerKey) === String(pk));
                     if (!player) return;
                     await toggleFavorite(player);
                     openWatchlist(); // re-render
                 });
+                row.appendChild(btn);
+                body.appendChild(row);
             });
         }
 
@@ -327,7 +353,8 @@
 
     function starButtonHTML(playerKey) {
         const starred = isFavorite(playerKey);
-        return `<button class="star-btn${starred ? ' starred' : ''}" data-player-key="${playerKey}" aria-label="${starred ? 'Remove from' : 'Add to'} watch list">${starred ? '★' : '☆'}</button>`;
+        const key = escapeHtml(playerKey);
+        return `<button class="star-btn${starred ? ' starred' : ''}" data-player-key="${key}" aria-label="${starred ? 'Remove from' : 'Add to'} watch list">${starred ? '★' : '☆'}</button>`;
     }
 
     function bindStarButtons(container = document) {

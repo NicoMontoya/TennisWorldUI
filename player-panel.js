@@ -222,11 +222,17 @@
         // Inject star button with full player data
         const starWrap = document.getElementById('ppStarWrap');
         if (starWrap && typeof TW !== 'undefined' && TW.auth) {
-            starWrap.innerHTML = `<button class="star-btn pp-star${TW.auth.isFavorite(playerKey) ? ' starred' : ''}"
-                data-player-key="${playerKey}" data-name="${name}" data-country="${country}" data-tour="${tour}"
-                aria-label="${TW.auth.isFavorite(playerKey) ? 'Remove from' : 'Add to'} watch list">
-                ${TW.auth.isFavorite(playerKey) ? '★' : '☆'}
-            </button>`;
+            starWrap.replaceChildren();
+            const starred = TW.auth.isFavorite(playerKey);
+            const btn = document.createElement('button');
+            btn.className = 'star-btn pp-star' + (starred ? ' starred' : '');
+            btn.dataset.playerKey = String(playerKey ?? '');
+            btn.dataset.name = name || '';
+            btn.dataset.country = country || '';
+            btn.dataset.tour = tour || '';
+            btn.setAttribute('aria-label', starred ? 'Remove from watch list' : 'Add to watch list');
+            btn.textContent = starred ? '★' : '☆';
+            starWrap.appendChild(btn);
             TW.auth.bindStarButtons(starWrap);
         }
 
