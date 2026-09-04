@@ -36,13 +36,36 @@
 
     async function getPlayers() {
         if (playerListCache) return playerListCache;
-        const [atp, wta] = await Promise.allSettled([
+        // Active roster (full standings) + retired legends (from the vintage roster).
+        // The legends carry an 's'+SackmannId key that the H2H backend resolves to a
+        // complete Sackmann-sourced career log — so a retired opponent is selectable
+        // AND returns full head-to-head history.
+        const [atp, wta, vAtp, vWta] = await Promise.allSettled([
             apiFetch('/api/standings?tour=ATP'),
             apiFetch('/api/standings?tour=WTA'),
+            apiFetch('/api/vintage-roster?tour=ATP'),
+            apiFetch('/api/vintage-roster?tour=WTA'),
         ]);
+
         const list = [];
-        if (atp.status === 'fulfilled') list.push(...(atp.value || []).map(p => ({ ...p, tour: 'ATP' })));
-        if (wta.status === 'fulfilled') list.push(...(wta.value || []).map(p => ({ ...p, tour: 'WTA' })));
+        const seen = new Set();                       // dedupe by tour+name; standings win
+        const add = (p, tour) => {
+            const k = `${tour}:${(p.name || '').toLowerCase()}`;
+            if (!p.name || !p.playerKey || seen.has(k)) return;
+            seen.add(k);
+            list.push({ ...p, tour });
+        };
+
+        if (atp.status === 'fulfilled') (atp.value || []).forEach(p => add(p, 'ATP'));
+        if (wta.status === 'fulfilled') (wta.value || []).forEach(p => add(p, 'WTA'));
+
+        // vintage-roster items: { position, id, name, countryAcr, legend } → picker shape
+        const legends = v => ((v && v.roster) || [])
+            .filter(r => r.legend)
+            .map(r => ({ playerKey: r.id, name: r.name, country: r.countryAcr, rank: r.position, legend: true }));
+        if (vAtp.status === 'fulfilled') legends(vAtp.value).forEach(p => add(p, 'ATP'));
+        if (vWta.status === 'fulfilled') legends(vWta.value).forEach(p => add(p, 'WTA'));
+
         playerListCache = list;
         return list;
     }
@@ -60,7 +83,7 @@
             <div class="h2h-drop-item" data-key="${p.playerKey}">
                 <span class="h2h-drop-flag">${flag(p.country)}</span>
                 <span class="h2h-drop-name">${p.name}</span>
-                <span class="h2h-drop-meta">#${p.rank} ${p.tour}</span>
+                <span class="h2h-drop-meta">${p.legend ? 'Legend' : '#' + p.rank} ${p.tour}</span>
             </div>`).join('');
         dropEl.hidden = false;
 

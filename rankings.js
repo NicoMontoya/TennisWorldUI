@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <td class="col-name">
                 <span class="player-name" data-open-player>${p.name}</span>${star}
             </td>
-            <td class="num col-age">${age ?? '—'}</td>
+            <td class="num col-age enrichable" data-field="age">${age != null ? age : '<span class="enrich-placeholder">·</span>'}</td>
             <td class="num col-pts">${p.points.toLocaleString()}</td>
             <td class="num col-titles enrichable" data-field="titles"><span class="enrich-placeholder">·</span></td>
             <td class="num col-wpct enrichable"   data-field="wpct"><span class="enrich-placeholder">·</span></td>
@@ -160,11 +160,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Update player object in allPlayers so column sorting works
         const player = (allPlayers._original || allPlayers).find(p => p.playerKey === playerKey);
-        if (player) { player._titles = stats.titles; player._winPct = stats.winPct; }
+        if (player) {
+            player._titles = stats.titles;
+            player._winPct = stats.winPct;
+            // Standings omits birthday — backfill it so the Age column and its sort work.
+            if (stats.birthday) player.birthday = stats.birthday;
+        }
 
         // Update dataset for sorting
         row.dataset.titles = stats.titles ?? '';
         row.dataset.wpct   = stats.winPct ?? '';
+
+        // Age (from profile birthday supplied by player-stats)
+        const age = computeAge(stats.birthday);
+        row.dataset.birthday = stats.birthday || '';
+        row.dataset.age      = age ?? 0;
+        const ageCell = row.querySelector('.col-age');
+        if (ageCell) ageCell.textContent = age != null ? age : '—';
 
         row.querySelector('[data-field="titles"]').textContent =
             stats.titles != null ? stats.titles : '—';

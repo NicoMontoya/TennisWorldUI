@@ -40,7 +40,7 @@
 
     async function loadPlayer() {
         const [profileResult, statsResult, historyResult, rankHistResult] = await Promise.allSettled([
-            apiFetch(`/api/players?playerKey=${playerKey}`),
+            apiFetch(`/api/players?playerKey=${playerKey}&tour=${tour}`),
             apiFetch(`/api/player-stats?tour=${tour}&playerKey=${playerKey}`),
             apiFetch(`/api/player-history?tour=${tour}&playerKey=${playerKey}`),
             apiFetch(`/api/player-ranking-history?tour=${tour}&playerKey=${playerKey}`),
@@ -67,17 +67,17 @@
     // ── Hero ──────────────────────────────────────────────────────────────────
 
     function renderHero(profile, stats) {
-        // URL params (name/country/rank/birthday) come from the panel or rankings
-        // page and use the correct RapidAPI namespace. profile?.name may be from
-        // the mismatched api-tennis.com namespace so it is only a last fallback.
-        const name      = urlName     || profile?.name     || '—';
-        const country   = urlCountry  || profile?.country  || '';
+        // Prefer URL params (passed by panel/rankings/bracket) for instant paint; fall
+        // back to the /api/players profile, which is now RapidAPI-sourced and shares the
+        // draw/rankings ID namespace — so profile.name/country/currentRank are the SAME
+        // person as the key (this is what fixed "Jeff Wolf from France"). Direct links
+        // with no URL identity now resolve correctly from the profile.
+        const name      = urlName     || profile?.name        || '—';
+        const country   = urlCountry  || profile?.country     || '';
         const logoUrl   = profile?.logoUrl || null;
-        const birthdate = urlBirthday || profile?.birthdate || null;
+        const birthdate = urlBirthday || profile?.birthdate   || null;
 
-        const seasons = profile?.seasons || [];
-        const latest  = seasons.find(s => s.year === THIS_YEAR) || seasons[0];
-        const rank    = urlRank || latest?.rank || null;
+        const rank    = urlRank || profile?.currentRank || null;
 
         const seed = { playerKey, name, country, rank, birthdate, tour };
         window._playerSeed = seed;

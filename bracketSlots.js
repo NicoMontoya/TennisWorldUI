@@ -12,6 +12,104 @@ window.TW = window.TW || {};
 
 TW.BRACKET_SLOTS = {
 
+    // ── US Open 2026 ATP (128 draw) ─────────────────────
+    // Source: en.wikipedia.org 2026 US Open Men's singles (?action=raw)
+    //   Sections 1-8 (top->bottom) RD1 team order. Cross-validated 64/64 against
+    //   the RapidAPI fixtures feed (every match mapped uniquely, no collisions).
+    // API returns 'U.S. Open - New York'; the 'us open' key matches via substring.
+    'us open|2026|ATP': [
+        /* 00 */ ['Zverev',               'Sonego'],
+        /* 01 */ ['Halys',                'Diaz Acosta'],
+        /* 02 */ ['Dimitrov',             'Popyrin'],
+        /* 03 */ ['Hanfmann',             'Tabilo'],
+        /* 04 */ ['Darderi',              'Wendelken'],
+        /* 05 */ ['Svrcina',              'Royer'],
+        /* 06 */ ['Sweeny',               'Moutet'],
+        /* 07 */ ['Fery',                 'Musetti'],
+        /* 08 */ ['Jodar',                'Kokkinakis'],
+        /* 09 */ ['Marozsan',             'Zheng'],
+        /* 10 */ ['Svajda',               'Altmaier'],
+        /* 11 */ ['Cerundolo',            'Ruud'],
+        /* 12 */ ['Bergs',                'Taberner'],
+        /* 13 */ ['de Jong',              'Passaro'],
+        /* 14 */ ['Choinski',             'van de Zandschulp'],
+        /* 15 */ ['Guerrieri',            'de Minaur'],
+        /* 16 */ ['Auger-Aliassime',      'Hijikata'],
+        /* 17 */ ['Burruchaga',           'Khachanov'],
+        /* 18 */ ['Molcan',               'Bonzi'],
+        /* 19 */ ['Giron',                'Buse'],
+        /* 20 */ ['Mensik',               'Mochizuki'],
+        /* 21 */ ['Rodionov',             'Mpetshi Perricard'],
+        /* 22 */ ['Vallejo',              'Monfils'],
+        /* 23 */ ['Borges',               'Tien'],
+        /* 24 */ ['Fritz',                'Dar Blanch'],
+        /* 25 */ ['Bellucci',             'Piros'],
+        /* 26 */ ['Ugo Carabelli',        'Struff'],
+        /* 27 */ ['Misolic',              'Cerundolo'],
+        /* 28 */ ['Blockx',               'Barrios Vera'],
+        /* 29 */ ['Shang',                'Trungelliti'],
+        /* 30 */ ['Basavareddy',          'Schoolkate'],
+        /* 31 */ ['Comesana',             'Cobolli'],
+        /* 32 */ ['Medvedev',             'Gaston'],
+        /* 33 */ ['Gorzny',               'Collignon'],
+        /* 34 */ ['Munar',                'Atmane'],
+        /* 35 */ ['Shimabukuro',          'Rinderknech'],
+        /* 36 */ ['Vacherot',             'Kovacevic'],
+        /* 37 */ ['Majchrzak',            'Medjedovic'],
+        /* 38 */ ['Vukic',                'Sakamoto'],
+        /* 39 */ ['Damm',                 'Tiafoe'],
+        /* 40 */ ['Nakashima',            'Baez'],
+        /* 41 */ ['Michelsen',            'Cina'],
+        /* 42 */ ['Merida',               'Fucsovics'],
+        /* 43 */ ['Cilic',                'Rublev'],
+        /* 44 */ ['Etcheverry',           'Kopriva'],
+        /* 45 */ ['Landaluce',            'Fearnley'],
+        /* 46 */ ['Berrettini',           'Wawrinka'],
+        /* 47 */ ['Navone',               'Djokovic'],
+        /* 48 */ ['Shelton',              'Griekspoor'],
+        /* 49 */ ['Dzumhur',              'Hurkacz'],
+        /* 50 */ ['Kecmanovic',           'Shapovalov'],
+        /* 51 */ ['Van Assche',           'Norrie'],
+        /* 52 */ ['Lehecka',              'Carreno Busta'],
+        /* 53 */ ['Samuel',               'Machac'],
+        /* 54 */ ['Harris',               'Kennedy'],
+        /* 55 */ ['Tsitsipas',            'Fils'],
+        /* 56 */ ['Bublik',               'Wolf'],
+        /* 57 */ ['Tirante',              'Mannarino'],
+        /* 58 */ ['Prizmic',              'Shevchenko'],
+        /* 59 */ ['Wong',                 'Paul'],
+        /* 60 */ ['Arnaldi',              'Duckworth'],
+        /* 61 */ ['Wu',                   'Walton'],
+        /* 62 */ ['Faria',                'Brooksby'],
+        /* 63 */ ['Safiullin',            'Alcaraz'],
+    ],
+
+    // ── Citi Open / Washington 2026 ATP (32 draw) ───────────────────────────────
+    // Source: en.wikipedia.org/wiki/2026_Mubadala_Citi_DC_Open_–_Men's_singles
+    //   raw wikitext (?action=raw) RD1-team order, cross-validated against the
+    //   RapidAPI fixtures feed (11/16 matchups confirmed; 5 were qualifier slots).
+    // API returns "Citi Open - Washington"; the 'washington' key matches via substring.
+    // NB: two different Svajdas — Trevor (Q, slot 4) and Zachary (LL, slot 11);
+    //     each pair's partner (Mensik / Vukic) disambiguates the match.
+    'washington|2026|ATP': [
+        /* 00 */ ['De Minaur',   'Tsitsipas'],
+        /* 01 */ ['Giron',       'Hewitt'],
+        /* 02 */ ['Nakashima',   'Etcheverry'],
+        /* 03 */ ['Svajda',      'Mensik'],
+        /* 04 */ ['Fritz',       'Bergs'],
+        /* 05 */ ['Majchrzak',   'Paul'],
+        /* 06 */ ['Michelsen',   'Draper'],
+        /* 07 */ ['Mannarino',   'Tien'],
+        /* 08 */ ['Fils',        'Jodar'],
+        /* 09 */ ['Nishikori',   'Shang'],
+        /* 10 */ ['Vukic',       'Svajda'],
+        /* 11 */ ['Arnaldi',     'Musetti'],
+        /* 12 */ ['Tiafoe',      'Atmane'],
+        /* 13 */ ['Tabilo',      'Griekspoor'],
+        /* 14 */ ['Humbert',     'Martin'],
+        /* 15 */ ['Damm',        'Shelton'],
+    ],
+
     // ── Wimbledon 2026 ATP ─────────────────────────────────────────────────────
     // Source: www.wimbledon.com/en_GB/draws/gentlemens-singles/1 (official draw order).
     // API returns "Wimbledon - London"; the 'wimbledon' key matches via substring.
