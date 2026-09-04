@@ -12,15 +12,47 @@ const API_BASE = (() => {
     return ''; // same-origin
 })();
 
+// Public GET paths that must never send Authorization (tokens in access logs).
+const PUBLIC_GET_PATHS = ['/api/hub', '/api/livescore', '/api/calendar'];
+
+function apiPathname(path) {
+    return String(path || '').split('?')[0];
+}
+
+// True when this request must omit Bearer: explicit { auth: false } or a
+// known-public GET (hub, livescore, calendar).
+function isAnonymousPublicGet(path, options = {}) {
+    if (options.auth === false) return true;
+    const method = String(options.method || 'GET').toUpperCase();
+    if (method !== 'GET') return false;
+    return PUBLIC_GET_PATHS.includes(apiPathname(path));
+}
+
+// Normalize pathname or href to a comparable page key (index.html, scores.html).
+// Treats clean URLs (/draws, /scores) the same as their .html peers.
+function normalizeNavPage(pathname) {
+    const raw = String(pathname || '').split('?')[0].split('#')[0];
+    const parts = raw.split('/').filter(Boolean);
+    let name = parts.pop() || 'index.html';
+    if (!name.includes('.')) {
+        return name === 'index' ? 'index.html' : `${name}.html`;
+    }
+    return name;
+}
+
 // ── apiFetch ───────────────────────────────────────────────────────────────────
 // Returns payload on success, throws on hard error.
+// Pass { auth: false } to force an anonymous request (no Authorization header).
 async function apiFetch(path, options = {}) {
+    const { auth, headers: optHeaders, ...fetchOpts } = options;
     const token = localStorage.getItem('tw-auth-token');
-    const headers = { ...(options.headers || {}) };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (options.body) headers['Content-Type'] = 'application/json';
+    const headers = { ...(optHeaders || {}) };
+    if (token && !isAnonymousPublicGet(path, options)) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    if (fetchOpts.body) headers['Content-Type'] = 'application/json';
 
-    const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+    const res = await fetch(`${API_BASE}${path}`, { ...fetchOpts, headers });
     if (!res.ok && res.status !== 401 && res.status !== 409) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (!json.ok) throw new Error(json.error || 'API error');
@@ -155,6 +187,73 @@ if ('serviceWorker' in navigator) {
     if (saved === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
 })();
 
+function initMobileNav() {
+    const toggle = document.getElementById('navToggle');
+    const menu = document.getElementById('navMenu');
+    if (!toggle || !menu) return;
+
+    const mq = window.matchMedia('(max-width: 768px)');
+    let lastFocus = null;
+    let backdrop = document.getElementById('navBackdrop');
+    if (!backdrop) {
+        backdrop = document.createElement('button');
+        backdrop.type = 'button';
+        backdrop.id = 'navBackdrop';
+        backdrop.className = 'nav-backdrop';
+        backdrop.setAttribute('aria-label', 'Close menu');
+        backdrop.hidden = true;
+        document.body.appendChild(backdrop);
+    }
+
+    function isOpen() {
+        return document.body.classList.contains('nav-open');
+    }
+
+    function openNav() {
+        if (!mq.matches || isOpen()) return;
+        lastFocus = document.activeElement;
+        document.body.classList.add('nav-open');
+        document.body.style.overflow = 'hidden';
+        toggle.setAttribute('aria-expanded', 'true');
+        backdrop.hidden = false;
+        const first = menu.querySelector('a, button');
+        if (first) first.focus();
+    }
+
+    function closeNav() {
+        if (!isOpen()) return;
+        document.body.classList.remove('nav-open');
+        document.body.style.overflow = '';
+        toggle.setAttribute('aria-expanded', 'false');
+        backdrop.hidden = true;
+        if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
+        lastFocus = null;
+    }
+
+    function toggleNav() {
+        if (isOpen()) closeNav();
+        else openNav();
+    }
+
+    toggle.addEventListener('click', toggleNav);
+    backdrop.addEventListener('click', closeNav);
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isOpen()) {
+            e.preventDefault();
+            closeNav();
+        }
+    });
+    menu.querySelectorAll('a').forEach((link) => {
+        link.addEventListener('click', closeNav);
+    });
+
+    const onBreakpoint = () => {
+        if (!mq.matches) closeNav();
+    };
+    if (typeof mq.addEventListener === 'function') mq.addEventListener('change', onBreakpoint);
+    else if (typeof mq.addListener === 'function') mq.addListener(onBreakpoint);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
 
     // ── Dark mode toggle ───────────────────────────────────────────────────
@@ -176,12 +275,15 @@ document.addEventListener('DOMContentLoaded', () => {
             String(document.documentElement.getAttribute('data-theme') === 'dark'));
     }
 
-    // ── Active nav link by page ────────────────────────────────────────────
-    const page = window.location.pathname.split('/').pop() || 'index.html';
+    // ── Active nav link by page (clean URLs and .html) ─────────────────────
+    const page = normalizeNavPage(window.location.pathname);
     document.querySelectorAll('.nav-link').forEach(link => {
         const href = link.getAttribute('href');
-        link.classList.toggle('active', href === page);
+        link.classList.toggle('active', normalizeNavPage(href) === page);
     });
+
+    // ── Mobile nav drawer (≤768px) ─────────────────────────────────────────
+    initMobileNav();
 
     // ── Nav scroll shadow ──────────────────────────────────────────────────
     const nav = document.getElementById('mainNav');

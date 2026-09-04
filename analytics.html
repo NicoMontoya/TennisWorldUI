@@ -37,12 +37,21 @@
                 </div>
                 <span class="logo-text">TennisWorld</span>
             </div>
-            <ul class="nav-menu">
+            <button type="button" class="nav-toggle" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navMenu">
+                <span class="nav-toggle-bars" aria-hidden="true">
+                    <span class="nav-toggle-bar"></span>
+                    <span class="nav-toggle-bar"></span>
+                    <span class="nav-toggle-bar"></span>
+                </span>
+            </button>
+            <ul class="nav-menu" id="navMenu">
                 <li><a href="index.html" class="nav-link">Home</a></li>
                 <li><a href="draws.html" class="nav-link">Calendar</a></li>
                 <li><a href="rankings.html" class="nav-link">Rankings</a></li>
                 <li><a href="analytics.html" class="nav-link">Analytics</a></li>
+                <li><a href="scores.html" class="nav-link">Scores</a></li>
             </ul>
+            <div class="nav-chrome">
             <button class="nav-theme-toggle" id="themeToggle" aria-label="Toggle dark mode">
                 <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
@@ -55,6 +64,7 @@
                 </svg>
             </button>
             <button class="nav-cta"><span>Sign In</span></button>
+            </div>
         </div>
     </nav>
 

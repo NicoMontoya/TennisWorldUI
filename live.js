@@ -1,124 +1,105 @@
 // ===================================
 // TennisWorld — Live Score Engine
 // ===================================
-// Polls /api/livescore on a smart interval and broadcasts updates
-// via custom DOM events. Any page can subscribe without coupling.
-//
-// WebSocket upgrade path (when api-tennis.com Premium is available):
-//   Replace startPolling() with connectWebSocket() below.
-//   The rest of the pub/sub system stays identical — just swap the source.
-//
-// Usage (from any page script):
-//   window.addEventListener('tw:live-update', e => {
-//       const { matches, updatedAt } = e.detail;
-//       // surgically update DOM with new match data
-//   });
-//   LiveEngine.start();
+// Polls GET /api/livescore (anonymous — no Bearer) while any match isLive.
+// Floor 15s; backoff 15 → 30 → 60 on errors. Pauses when document.hidden;
+// one refresh on visibilitychange → visible. Does not poll when idle.
 
 const LiveEngine = (() => {
-    // ── Config ────────────────────────────────────────────────────────────────
-    const POLL_ACTIVE   = 15_000;   // 15s when live matches exist
-    const POLL_IDLE     = 60_000;   // 60s when no live matches
-    const POLL_BACKOFF  = 120_000;  // 2min after consecutive errors
-    const MAX_ERRORS    = 3;
+    const POLL_MIN     = 15_000;
+    const POLL_LIVE    = 15_000;
+    const BACKOFF_CAP  = 60_000;
 
-    // ── State ─────────────────────────────────────────────────────────────────
-    let timerId       = null;
-    let errorCount    = 0;
-    let lastMatches   = null;  // shallow cache to detect actual changes
+    let timerId     = null;
+    let inFlight    = false;
+    let backoffMs   = POLL_MIN;
+    let lastMatches = null;
+    let running     = false;
 
-    // ── Pub/sub ───────────────────────────────────────────────────────────────
     function publish(matches) {
-        const updatedAt = new Date().toISOString();
         window.dispatchEvent(new CustomEvent('tw:live-update', {
-            detail: { matches, updatedAt },
+            detail: { matches, updatedAt: new Date().toISOString() },
         }));
     }
 
     function publishStatus(status) {
-        // 'connected' | 'disconnected' | 'idle'
         window.dispatchEvent(new CustomEvent('tw:live-status', {
             detail: { status },
         }));
     }
 
-    // ── Polling ───────────────────────────────────────────────────────────────
+    function clearTimer() {
+        if (timerId) {
+            clearTimeout(timerId);
+            timerId = null;
+        }
+    }
+
+    function schedule(ms) {
+        clearTimer();
+        const delay = Math.max(POLL_MIN, ms);
+        timerId = setTimeout(poll, delay);
+    }
+
     async function poll() {
+        if (document.hidden) {
+            clearTimer();
+            return;
+        }
+        if (inFlight) return;
+        inFlight = true;
         try {
-            const data = await apiFetch('/api/livescore?tour=ATP');
-            errorCount = 0;
+            const data = await apiFetch('/api/livescore?tour=ATP', { auth: false });
+            backoffMs = POLL_MIN;
 
-            const hasLive = Array.isArray(data) && data.length > 0;
+            const list = Array.isArray(data) ? data : [];
+            const hasLive = list.some(m => m && m.isLive);
 
-            // Only publish if data actually changed (avoid unnecessary re-renders)
             const serialized = JSON.stringify(data);
             if (serialized !== lastMatches) {
                 lastMatches = serialized;
-                publish(data);
+                publish(list);
             }
 
             publishStatus(hasLive ? 'connected' : 'idle');
 
-            // Adaptive interval: faster when live, slower when idle
-            timerId = setTimeout(poll, hasLive ? POLL_ACTIVE : POLL_IDLE);
-
+            if (hasLive && !document.hidden && running) {
+                schedule(POLL_LIVE);
+            } else {
+                clearTimer();
+                running = hasLive ? running : false;
+            }
         } catch (err) {
-            errorCount++;
-            console.warn(`[Live] Poll failed (${errorCount}/${MAX_ERRORS}):`, err.message);
+            console.warn('[Live] Poll failed:', err.message);
             publishStatus('disconnected');
-
-            // Exponential backoff on repeated failures
-            const delay = errorCount >= MAX_ERRORS ? POLL_BACKOFF : POLL_IDLE;
-            timerId = setTimeout(poll, delay);
+            if (!document.hidden && running) schedule(backoffMs);
+            backoffMs = Math.min(backoffMs * 2, BACKOFF_CAP);
+        } finally {
+            inFlight = false;
         }
     }
 
-    // ── WebSocket path (Premium plan) ─────────────────────────────────────────
-    // Uncomment when api-tennis.com WebSocket endpoint is available.
-    // The Premium endpoint: wss://wss.api-tennis.com/live?APIkey=...&timezone=UTC
-    //
-    // function connectWebSocket(apiKey) {
-    //     const ws = new WebSocket(`wss://wss.api-tennis.com/live?APIkey=${apiKey}&timezone=UTC`);
-    //
-    //     ws.onopen    = () => publishStatus('connected');
-    //     ws.onclose   = () => { publishStatus('disconnected'); setTimeout(() => connectWebSocket(apiKey), 5000); };
-    //     ws.onerror   = () => publishStatus('disconnected');
-    //     ws.onmessage = (event) => {
-    //         try {
-    //             const matches = JSON.parse(event.data);
-    //             publish(matches);
-    //         } catch { /* ignore malformed frames */ }
-    //     };
-    //
-    //     return ws;
-    // }
-
-    // ── Public API ────────────────────────────────────────────────────────────
     return {
         start() {
-            if (timerId) return; // already running
+            running = true;
+            if (timerId || inFlight) return;
             poll();
         },
 
         stop() {
-            if (timerId) {
-                clearTimeout(timerId);
-                timerId = null;
-            }
-            publishStatus('idle');
+            running = false;
+            clearTimer();
         },
 
-        // Force an immediate refresh (e.g. when user tabs back in)
         refresh() {
-            if (timerId) clearTimeout(timerId);
-            timerId = null;
+            if (document.hidden) return;
+            running = true;
+            clearTimer();
             poll();
         },
     };
 })();
 
-// ── Auto-start & visibility handling ─────────────────────────────────────────
-// Pause polling when the tab is hidden to save requests, resume instantly on focus.
 document.addEventListener('DOMContentLoaded', () => {
     LiveEngine.start();
 

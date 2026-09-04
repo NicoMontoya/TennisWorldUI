@@ -13,7 +13,7 @@
             "name": "Live Scores",
             "short_name": "Scores",
             "description": "View live tennis scores",
-            "url": "/index.html"
+            "url": "/scores.html"
         },
         {
             "name": "Draws",
