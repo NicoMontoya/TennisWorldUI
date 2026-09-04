@@ -1,0 +1,7 @@
+# Keep VCS / local junk out of Workers static assets
+.git
+.gitignore
+.DS_Store
+node_modules
+*.test.js
+ISA.md
