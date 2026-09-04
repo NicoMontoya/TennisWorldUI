@@ -1,53 +1,88 @@
 // ===================================
 // TennisWorld — Scores / Hub page
 // ===================================
+// Primary: GET /api/hub (anonymous). Livescore overlay via LiveEngine
+// only while any match isLive. All API strings go through textContent
+// or dataset — never concatenated into innerHTML.
 
 document.addEventListener('DOMContentLoaded', () => {
 
-    // ── Ticker ─────────────────────────────────────────────────────────────
+    const HUB_INTERVAL_MS = 2 * 60 * 1000;
     let currentTournamentKey  = null;
     let currentTournamentName = '';
+    let hubTimer = null;
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text != null && text !== '') node.textContent = text;
+        return node;
+    }
+
+    function anyLive(matches) {
+        return (matches || []).some(m => m && m.isLive);
+    }
+
+    // ── Ticker ─────────────────────────────────────────────────────────────
 
     function duplicateTicker(track) {
         const parent = track.parentElement;
-        parent.querySelectorAll('[aria-hidden="true"]').forEach(el => el.remove());
+        parent.querySelectorAll('[aria-hidden="true"]').forEach(n => n.remove());
         const clone = track.cloneNode(true);
         clone.setAttribute('aria-hidden', 'true');
         parent.appendChild(clone);
     }
 
     function stampTickerTime() {
-        const el = document.getElementById('tickerUpdated');
-        if (!el) return;
-        el.textContent = `· ${timeAgo(new Date())}`;
+        const node = document.getElementById('tickerUpdated');
+        if (!node) return;
+        node.textContent = `· ${timeAgo(new Date())}`;
         clearTimeout(stampTickerTime._t);
         stampTickerTime._t = setTimeout(stampTickerTime, 60_000);
     }
 
-    function buildTickerItems(matches, tournShort) {
-        return matches.map(m => {
-            const isLive = m.isLive;
+    function fillTickerTrack(track, matches, tournShort) {
+        const frag = document.createDocumentFragment();
+        (matches || []).forEach(m => {
+            const isLive = !!m.isLive;
             const isDone = m.status === 'Finished';
-            const cls    = isLive ? ' ticker-live' : isDone ? ' ticker-done' : '';
-            const win    = matchWinner(m);
-            const p1Won  = win === 'p1';
-            const score  = m.setScores?.length ? formatSetScores(m.setScores) : (m.finalResult || '');
-            const gameStr = (isLive && m.currentGame)
-                ? ` · <strong>${formatGameScore(m.currentGame)}</strong>`
-                : '';
-            const versus = isDone && win
-                ? `${p1Won ? m.player1Name : m.player2Name} def. ${p1Won ? m.player2Name : m.player1Name}`
-                : `${m.player1Name} vs ${m.player2Name}`;
-            const tag = isLive
-                ? `<span class="ticker-tag ticker-tag-live">Live</span>`
-                : isDone
-                ? `<span class="ticker-tag">${score}</span>`
-                : `<span class="ticker-tag ticker-tag-soon">Upcoming</span>`;
-            return `<span class="ticker-item${cls}">
-                <span class="ticker-event">${tournShort} · ${m.round || ''}</span>
-                ${versus} ${tag}${gameStr}
-            </span><span class="ticker-divider">|</span>`;
-        }).join('');
+            const item = el('span', 'ticker-item' + (isLive ? ' ticker-live' : isDone ? ' ticker-done' : ''));
+
+            const event = el('span', 'ticker-event');
+            event.textContent = `${tournShort} · ${m.round || ''}`;
+            item.appendChild(event);
+
+            const win = matchWinner(m);
+            const versus = document.createTextNode(
+                isDone && win
+                    ? ` ${win === 'p1' ? (m.player1Name || '') : (m.player2Name || '')} def. ${win === 'p1' ? (m.player2Name || '') : (m.player1Name || '')} `
+                    : ` ${m.player1Name || ''} vs ${m.player2Name || ''} `
+            );
+            item.appendChild(versus);
+
+            const tag = el('span', 'ticker-tag' + (isLive ? ' ticker-tag-live' : isDone ? '' : ' ticker-tag-soon'));
+            if (isLive) {
+                tag.textContent = 'Live';
+            } else if (isDone) {
+                tag.textContent = m.setScores?.length
+                    ? formatSetScores(m.setScores)
+                    : (m.finalResult || '');
+            } else {
+                tag.textContent = 'Upcoming';
+            }
+            item.appendChild(tag);
+
+            if (isLive && m.currentGame) {
+                item.appendChild(document.createTextNode(' · '));
+                const game = document.createElement('strong');
+                game.textContent = formatGameScore(m.currentGame);
+                item.appendChild(game);
+            }
+
+            frag.appendChild(item);
+            frag.appendChild(el('span', 'ticker-divider', '|'));
+        });
+        track.replaceChildren(frag);
     }
 
     function renderTicker(data) {
@@ -66,13 +101,13 @@ document.addEventListener('DOMContentLoaded', () => {
             ? currentTournamentName.split(' - ').pop()
             : currentTournamentName;
 
-        track.innerHTML = buildTickerItems(data.recentResults, tournShort);
+        fillTickerTrack(track, data.recentResults, tournShort);
         duplicateTicker(track);
         stampTickerTime();
         tickerEl.hidden = false;
     }
 
-    // ── Hub ─────────────────────────────────────────────────────────────────
+    // ── Hub helpers ─────────────────────────────────────────────────────────
     const ROUND_LABELS = {
         'final': 'Final', 'finals': 'Final',
         '1/2-finals': 'Semifinals', 'semi-finals': 'Semifinals', 'semifinal': 'Semifinals', 'semifinals': 'Semifinals',
@@ -86,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function cleanRound(round) {
         if (!round) return '';
-        const parts = round.split(' - ');
+        const parts = String(round).split(' - ');
         const r = (parts[parts.length - 1] || round).trim();
         return ROUND_LABELS[r.toLowerCase()] || r;
     }
@@ -103,34 +138,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
-    function renderFeaturedMatch(m, tournamentName) {
-        return TW.MatchCard(m, tournamentName);
+    function tstatItem(value, label) {
+        const item = el('div', 'tstat-item');
+        item.appendChild(el('span', 'tstat-val', value));
+        item.appendChild(el('span', 'tstat-label', label));
+        return item;
     }
 
-    function renderH2H(h2h, match) {
+    function renderH2H(container, h2h, match) {
+        if (!container) return;
+        container.replaceChildren();
         if (!h2h || !match) {
-            return '<div class="tstat-item"><span class="tstat-val">—</span><span class="tstat-label">H2H</span></div>';
+            container.appendChild(tstatItem('—', 'H2H'));
+            return;
         }
         const p1Last = (match.player1Name || '').split(' ').pop();
         const p2Last = (match.player2Name || '').split(' ').pop();
-        return `
-            <div class="tstat-item">
-                <span class="tstat-val">${h2h.p1Wins}</span>
-                <span class="tstat-label">${p1Last}</span>
-            </div>
-            <div class="tstat-item">
-                <span class="tstat-val" style="font-size:0.8rem;opacity:0.45">${h2h.totalMatches}</span>
-                <span class="tstat-label">H2H matches</span>
-            </div>
-            <div class="tstat-item">
-                <span class="tstat-val">${h2h.p2Wins}</span>
-                <span class="tstat-label">${p2Last}</span>
-            </div>`;
+        container.appendChild(tstatItem(String(h2h.p1Wins ?? '—'), p1Last || 'P1'));
+        const mid = tstatItem(String(h2h.totalMatches ?? ''), 'H2H matches');
+        mid.querySelector('.tstat-val').style.fontSize = '0.8rem';
+        mid.querySelector('.tstat-val').style.opacity = '0.45';
+        container.appendChild(mid);
+        container.appendChild(tstatItem(String(h2h.p2Wins ?? '—'), p2Last || 'P2'));
     }
 
-    function renderLatestResult(matches) {
+    function renderLatestResult(container, matches) {
+        if (!container) return;
+        container.replaceChildren();
         const finished = (matches || []).filter(m => m.status === 'Finished');
-        if (!finished.length) return '<span style="color:#999">No completed matches yet</span>';
+        if (!finished.length) {
+            container.appendChild(el('span', '', 'No completed matches yet'));
+            container.lastChild.style.color = '#999';
+            return;
+        }
 
         const m      = finished[0];
         const winner = matchWinner(m);
@@ -143,18 +183,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 const parts = (m.finalResult || '').split(' - ');
                 return parts.length === 2 ? `${parts[0]}–${parts[1]} sets` : '';
               })();
-        const roundLabel = cleanRound(m.round);
 
-        return `<span class="latest-winner">${wName}</span>
-                <span class="latest-vs">def.</span>
-                <span class="latest-loser">${lName}</span>
-                ${score ? `<span class="latest-score">${score}</span>` : ''}
-                <span class="latest-round">${roundLabel}</span>`;
+        container.appendChild(el('span', 'latest-winner', wName || ''));
+        container.appendChild(el('span', 'latest-vs', 'def.'));
+        container.appendChild(el('span', 'latest-loser', lName || ''));
+        if (score) container.appendChild(el('span', 'latest-score', score));
+        container.appendChild(el('span', 'latest-round', cleanRound(m.round)));
     }
 
     // ── Today's Matches grid ────────────────────────────────────────────────
 
-    // Group matches by round label, sorted by round importance
     function renderTodaysMatches(matches, tournamentName) {
         const section = document.getElementById('todaysSection');
         const grid    = document.getElementById('todaysGrid');
@@ -163,15 +201,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!matches || !matches.length) {
             section.hidden = true;
+            grid.replaceChildren();
             return;
         }
 
         const shortName = tournamentName
-            ? tournamentName.split(' - ').pop().trim()
+            ? String(tournamentName).split(' - ').pop().trim()
             : 'Today';
         if (title) title.textContent = `Today at ${shortName}`;
 
-        // Group by round
         const groups = {};
         for (const m of matches) {
             const r = cleanRound(m.round) || m.round || 'Matches';
@@ -179,21 +217,19 @@ document.addEventListener('DOMContentLoaded', () => {
             groups[r].push(m);
         }
 
-        // Sort groups by round order (Final first)
         const sortedRounds = Object.keys(groups).sort((a, b) => {
             return (ROUND_ORDER[a] || 99) - (ROUND_ORDER[b] || 99);
         });
 
-        grid.innerHTML = sortedRounds.map(round => {
-            const ms = groups[round];
-            const rows = ms.map(m => renderMatchRow(m)).join('');
-            return `<div class="tmr-group">
-                <div class="tmr-round-label">${round}</div>
-                ${rows}
-            </div>`;
-        }).join('');
+        const frag = document.createDocumentFragment();
+        sortedRounds.forEach(round => {
+            const group = el('div', 'tmr-group');
+            group.appendChild(el('div', 'tmr-round-label', round));
+            groups[round].forEach(m => group.appendChild(renderMatchRow(m)));
+            frag.appendChild(group);
+        });
+        grid.replaceChildren(frag);
 
-        // Bind player-panel open on player name clicks
         if (typeof TW !== 'undefined' && TW.auth?.bindStarButtons) {
             TW.auth.bindStarButtons(grid);
         }
@@ -202,67 +238,66 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderMatchRow(m) {
-        const isDone     = m.status === 'Finished';
-        const isLive     = m.isLive;
-        const isUpcoming = !isDone && !isLive;
-        const winner     = matchWinner(m);
-        const p1Won      = winner === 'p1';
-        const p2Won      = winner === 'p2';
+        const isDone = m.status === 'Finished';
+        const isLive = !!m.isLive;
+        const winner = matchWinner(m);
+        const p1Won  = winner === 'p1';
+        const p2Won  = winner === 'p2';
 
-        const score = isDone && m.setScores?.length
-            ? `<span class="tmr-score">${formatSetScores(m.setScores)}</span>`
-            : isLive
-            ? `<span class="tmr-badge tmr-badge-live">Live</span>`
-            : `<span class="tmr-badge tmr-badge-soon">—</span>`;
+        const row = el('div', 'tmr' + (isLive ? ' tmr-is-live' : '') + (isDone ? ' tmr-is-done' : ''));
 
-        const p1Seed = m.player1Seed ? `<span class="tmr-seed">${m.player1Seed}</span>` : '';
-        const p2Seed = m.player2Seed ? `<span class="tmr-seed">${m.player2Seed}</span>` : '';
-
-        // Player name — make clickable if we have a key
-        function playerEl(name, key, won) {
-            const wonClass = won ? ' tmr-won' : '';
-            const lostClass = (isDone && !won && winner) ? ' tmr-lost' : '';
+        function playerCell(side, name, key, seed, won) {
+            const cell = el('div', side);
+            if (seed) cell.appendChild(el('span', 'tmr-seed', String(seed)));
+            const pname = el('span', 'tmr-pname' + (won ? ' tmr-won' : '') + (isDone && !won && winner ? ' tmr-lost' : ''));
+            pname.textContent = name || '—';
             if (key) {
-                return `<span class="tmr-pname${wonClass}${lostClass}" data-open-player
-                    data-player-key="${key}" data-name="${name}"
-                    data-tour="${m.tour || 'ATP'}" data-country="">${name}</span>`;
+                pname.setAttribute('data-open-player', '');
+                pname.dataset.playerKey = String(key);
+                pname.dataset.name = name || '';
+                pname.dataset.tour = m.tour || 'ATP';
+                pname.dataset.country = '';
             }
-            return `<span class="tmr-pname${wonClass}${lostClass}">${name}</span>`;
+            cell.appendChild(pname);
+            return cell;
         }
 
-        return `<div class="tmr${isLive ? ' tmr-is-live' : ''}${isDone ? ' tmr-is-done' : ''}">
-            <div class="tmr-p1">${p1Seed}${playerEl(m.player1Name || '—', m.player1Key, p1Won)}</div>
-            <div class="tmr-center">${score}</div>
-            <div class="tmr-p2">${p2Seed}${playerEl(m.player2Name || '—', m.player2Key, p2Won)}</div>
-        </div>`;
+        row.appendChild(playerCell('tmr-p1', m.player1Name, m.player1Key, m.player1Seed, p1Won));
+
+        const center = el('div', 'tmr-center');
+        if (isDone && m.setScores?.length) {
+            center.appendChild(el('span', 'tmr-score', formatSetScores(m.setScores)));
+        } else if (isLive) {
+            center.appendChild(el('span', 'tmr-badge tmr-badge-live', 'Live'));
+        } else {
+            center.appendChild(el('span', 'tmr-badge tmr-badge-soon', '—'));
+        }
+        row.appendChild(center);
+
+        row.appendChild(playerCell('tmr-p2', m.player2Name, m.player2Key, m.player2Seed, p2Won));
+        return row;
     }
 
     // ── Live updates to the today grid ─────────────────────────────────────
-    // When livescore fires, patch any live matches already in the grid
     window.addEventListener('tw:live-update', ({ detail: { matches } }) => {
         if (!currentTournamentKey) return;
 
-        const grid = document.getElementById('todaysGrid');
-        if (!grid) return;
-
-        // Update ticker
         const relevant = (matches || []).filter(m =>
             m.isLive && String(m.tournamentKey) === String(currentTournamentKey)
         );
-        if (relevant.length) {
-            const track = document.getElementById('tickerTrack');
-            if (track) {
-                const tournShort = currentTournamentName.includes(' - ')
-                    ? currentTournamentName.split(' - ').pop()
-                    : currentTournamentName;
-                track.innerHTML = buildTickerItems(relevant, tournShort);
-                duplicateTicker(track);
-                stampTickerTime();
-            }
+        if (!relevant.length) return;
+
+        const track = document.getElementById('tickerTrack');
+        if (track) {
+            const tournShort = currentTournamentName.includes(' - ')
+                ? currentTournamentName.split(' - ').pop()
+                : currentTournamentName;
+            fillTickerTrack(track, relevant, tournShort);
+            duplicateTicker(track);
+            stampTickerTime();
         }
     });
 
-    // ── Live status pill ────────────────────────────────────────────────────
     window.addEventListener('tw:live-status', ({ detail: { status } }) => {
         const pill = document.getElementById('liveStatusPill');
         if (!pill) return;
@@ -272,15 +307,11 @@ document.addEventListener('DOMContentLoaded', () => {
             : '⚠ Reconnecting…';
     });
 
-    // ── Featured-match win-probability bar (additive) ───────────────────────
-    // Appends a prob bar into a dedicated container below the featured match.
-    // Never interleaves the featured-match template; isolated in TW.ProbBar.
     async function mountFeaturedProbBar(featuredMatch) {
         if (typeof TW === 'undefined' || !TW.ProbBar) return;
         const host = document.getElementById('hubFeaturedMatch');
         if (!host) return;
 
-        // Remove any stale bar from a previous refresh cycle.
         const stale = document.getElementById('hubProbBar');
         if (stale) stale.remove();
 
@@ -289,59 +320,99 @@ document.addEventListener('DOMContentLoaded', () => {
         host.appendChild(container);
 
         await TW.ProbBar.mount(container, { ...featuredMatch, tour: 'ATP' });
-        // If nothing mounted (ineligible / unreachable), drop the empty container.
         if (!container.childNodes.length) container.remove();
     }
 
-    // ── Load hub + today's matches ──────────────────────────────────────────
+    function showFeaturedError(host) {
+        host.replaceChildren();
+        host.insertAdjacentHTML('afterbegin', errorCardHTML('Could not load match data.'));
+        const btn = el('button', 'error-retry-btn', 'Try again');
+        btn.type = 'button';
+        btn.addEventListener('click', () => loadHub());
+        host.querySelector('.error-card')?.appendChild(btn);
+    }
+
+    function startLiveOverlayIfNeeded(payload) {
+        if (typeof LiveEngine === 'undefined') return;
+        const live = !!(payload?.featuredMatch?.isLive || anyLive(payload?.todaysMatches) || anyLive(payload?.recentResults));
+        if (live) LiveEngine.start();
+    }
+
+    function stopHubPoll() {
+        if (hubTimer) {
+            clearTimeout(hubTimer);
+            hubTimer = null;
+        }
+    }
+
+    function scheduleHubPoll() {
+        stopHubPoll();
+        if (document.hidden) return;
+        hubTimer = setTimeout(async () => {
+            await loadHub();
+            scheduleHubPoll();
+        }, HUB_INTERVAL_MS);
+    }
+
     async function loadHub() {
         const featuredEl = document.getElementById('hubFeaturedMatch');
         if (featuredEl) featuredEl.innerHTML = skeletonHTML(3);
 
         try {
-            const data = await apiFetch('/api/hub?tour=ATP');
+            const data = await apiFetch('/api/hub?tour=ATP', { auth: false });
 
             renderTicker(data);
 
+            const nameEl = document.getElementById('hubTournamentName');
             if (!data || !data.tournament) {
-                document.getElementById('hubTournamentName').textContent = 'No active tournament';
-                if (featuredEl) featuredEl.innerHTML = '';
+                if (nameEl) nameEl.textContent = 'No active tournament';
+                if (featuredEl) featuredEl.replaceChildren();
+                renderH2H(document.getElementById('hubH2HStats'), null, null);
+                renderLatestResult(document.getElementById('hubLatestResult'), []);
+                renderTodaysMatches([], '');
                 return;
             }
 
             const { tournament, featuredMatch, recentResults, todaysMatches, h2h } = data;
 
-            document.getElementById('hubTournamentName').textContent = tournament.name;
-            document.getElementById('hubRoundLabel').textContent     = featuredMatch ? cleanRound(featuredMatch.round) : '—';
-            document.getElementById('hubRoundSub').textContent       = featuredMatch?.isLive
-                ? 'In progress · Today'
-                : featuredMatch?.status === 'Not Started'
-                ? 'Coming up'
-                : 'Most recent';
-            document.getElementById('hubH2HStats').innerHTML = renderH2H(h2h, featuredMatch);
-            document.getElementById('hubFeaturedMatch').innerHTML = renderFeaturedMatch(featuredMatch, tournament.name);
-            document.getElementById('hubLatestResult').innerHTML  = renderLatestResult(recentResults);
+            if (nameEl) nameEl.textContent = tournament.name || '';
+            const roundEl = document.getElementById('hubRoundLabel');
+            if (roundEl) roundEl.textContent = featuredMatch ? cleanRound(featuredMatch.round) : '—';
+            const subEl = document.getElementById('hubRoundSub');
+            if (subEl) {
+                subEl.textContent = featuredMatch?.isLive
+                    ? 'In progress · Today'
+                    : featuredMatch?.status === 'Not Started'
+                    ? 'Coming up'
+                    : 'Most recent';
+            }
 
-            // Render today's full match list
+            renderH2H(document.getElementById('hubH2HStats'), h2h, featuredMatch);
+            renderLatestResult(document.getElementById('hubLatestResult'), recentResults);
             renderTodaysMatches(todaysMatches || [], tournament.name);
 
-            // ── Win-probability bar (ADDITIVE, post-primary-render) ──────────
-            // Runs only AFTER the featured match is in the DOM. Fully isolated:
-            // any failure (incl. /api/predict unreachable) renders nothing and
-            // never disturbs the hub above.
+            if (featuredEl) {
+                featuredEl.innerHTML = TW.MatchCard(featuredMatch, tournament.name);
+            }
+
             mountFeaturedProbBar(featuredMatch);
+            startLiveOverlayIfNeeded(data);
 
         } catch (err) {
             console.warn('Hub load failed:', err.message);
-            const featuredEl2 = document.getElementById('hubFeaturedMatch');
-            if (featuredEl2) featuredEl2.innerHTML = errorCardHTML('Could not load match data.', 'loadHub');
+            if (featuredEl) showFeaturedError(featuredEl);
         }
     }
 
-    window.loadHub = loadHub;
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopHubPoll();
+        } else {
+            loadHub();
+            scheduleHubPoll();
+        }
+    });
 
-    // Auto-refresh hub + today's grid every 2 minutes
     loadHub();
-    setInterval(loadHub, 2 * 60 * 1000);
-
+    scheduleHubPoll();
 });

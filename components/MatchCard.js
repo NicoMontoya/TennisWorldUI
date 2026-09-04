@@ -78,16 +78,22 @@ TW.MatchCard = function MatchCard(m, tournamentName) {
     const p1Score = TW.ScoreBoard(m, 'p1', status);
     const p2Score = TW.ScoreBoard(m, 'p2', status);
 
+    const esc = typeof escapeHtml === 'function' ? escapeHtml : function (s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    };
+
     // Status pill
     const statusPill = status === 'live'
         ? '<div class="hub-live-pill">● Live</div>'
         : status === 'finished'
         ? '<div class="hub-live-pill" style="color:var(--text-secondary)">Finished</div>'
-        : '<div class="hub-live-pill" style="color:var(--text-muted)">Upcoming · ' + formatMatchDate(m) + '</div>';
+        : '<div class="hub-live-pill" style="color:var(--text-muted)">Upcoming · ' + esc(formatMatchDate(m)) + '</div>';
 
     // Live point score
     const gameScoreHtml = (status === 'live' && m.currentGame)
-        ? '<div class="hub-game-score">' + formatGameScore(m.currentGame) + '</div>'
+        ? '<div class="hub-game-score">' + esc(formatGameScore(m.currentGame)) + '</div>'
         : '';
 
     // Set column headers (only show if there are scores)
@@ -101,7 +107,7 @@ TW.MatchCard = function MatchCard(m, tournamentName) {
     return '\n    <div class="hub-player hub-player-left">\n' +
         '        <div class="hub-player-identity">\n' +
         '            <div>\n' +
-        '                <div class="hub-player-name' + (win === 'p1' ? ' is-winner' : '') + '">' + m.player1Name + '</div>\n' +
+        '                <div class="hub-player-name' + (win === 'p1' ? ' is-winner' : '') + '">' + esc(m.player1Name) + '</div>\n' +
         '                <div class="hub-player-sub">' + (status === 'finished' && win === 'p1' ? '● Winner' : '') + '</div>\n' +
         '            </div>\n' +
         '        </div>\n' +
@@ -111,13 +117,13 @@ TW.MatchCard = function MatchCard(m, tournamentName) {
         '        ' + statusPill + '\n' +
         '        ' + gameScoreHtml + '\n' +
         '        <div class="hub-set-headers">' + setLabels + '</div>\n' +
-        '        <div class="hub-round-center">' + tournamentName + ' · ' + round + '</div>\n' +
+        '        <div class="hub-round-center">' + esc(tournamentName) + ' · ' + esc(round) + '</div>\n' +
         '    </div>\n' +
         '    <div class="hub-player hub-player-right">\n' +
         '        <div class="hub-sets">' + p2Score + '</div>\n' +
         '        <div class="hub-player-identity hub-player-identity-r">\n' +
         '            <div>\n' +
-        '                <div class="hub-player-name' + (win === 'p2' ? ' is-winner' : '') + '">' + m.player2Name + '</div>\n' +
+        '                <div class="hub-player-name' + (win === 'p2' ? ' is-winner' : '') + '">' + esc(m.player2Name) + '</div>\n' +
         '                <div class="hub-player-sub">' + (status === 'finished' && win === 'p2' ? '● Winner' : '') + '</div>\n' +
         '            </div>\n' +
         '        </div>\n' +
