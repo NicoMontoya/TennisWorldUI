@@ -2,8 +2,9 @@
 // TennisWorld — Live Score Engine
 // ===================================
 // Polls GET /api/livescore (anonymous — no Bearer) while any match isLive.
-// Floor 15s; backoff 15 → 30 → 60 on errors. Pauses when document.hidden;
-// one refresh on visibilitychange → visible. Does not poll when idle.
+// Tour-aware (ATP|WTA allowlist). Floor 15s; backoff 15 → 30 → 60 on errors.
+// Pauses when document.hidden; one refresh on visibilitychange → visible.
+// Does not poll when idle.
 
 const LiveEngine = (() => {
     const POLL_MIN     = 15_000;
@@ -15,16 +16,22 @@ const LiveEngine = (() => {
     let backoffMs   = POLL_MIN;
     let lastMatches = null;
     let running     = false;
+    let tour        = (typeof resolveTour === 'function' ? resolveTour() : 'ATP');
+
+    function currentTour() {
+        const allowed = typeof parseTour === 'function' ? parseTour(tour) : null;
+        return allowed || 'ATP';
+    }
 
     function publish(matches) {
         window.dispatchEvent(new CustomEvent('tw:live-update', {
-            detail: { matches, updatedAt: new Date().toISOString() },
+            detail: { matches, updatedAt: new Date().toISOString(), tour: currentTour() },
         }));
     }
 
     function publishStatus(status) {
         window.dispatchEvent(new CustomEvent('tw:live-status', {
-            detail: { status },
+            detail: { status, tour: currentTour() },
         }));
     }
 
@@ -49,7 +56,8 @@ const LiveEngine = (() => {
         if (inFlight) return;
         inFlight = true;
         try {
-            const data = await apiFetch('/api/livescore?tour=ATP', { auth: false });
+            const t = currentTour();
+            const data = await apiFetch(`/api/livescore?tour=${encodeURIComponent(t)}`, { auth: false });
             backoffMs = POLL_MIN;
 
             const list = Array.isArray(data) ? data : [];
@@ -96,6 +104,22 @@ const LiveEngine = (() => {
             running = true;
             clearTimer();
             poll();
+        },
+
+        setTour(next) {
+            const allowed = typeof parseTour === 'function' ? parseTour(next) : null;
+            const t = allowed || 'ATP';
+            if (t === tour) return;
+            tour = t;
+            lastMatches = null;
+            if (running && !document.hidden) {
+                clearTimer();
+                poll();
+            }
+        },
+
+        getTour() {
+            return currentTour();
         },
     };
 })();
