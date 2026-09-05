@@ -69,7 +69,42 @@ describe('scores hub XSS sinks', () => {
     });
 
     it('calls hub and livescore as anonymous public GETs', () => {
-        expect(scoresSrc).toMatch(/apiFetch\('\/api\/hub\?tour=ATP',\s*\{\s*auth:\s*false\s*\}\)/);
-        expect(liveSrc).toMatch(/apiFetch\('\/api\/livescore\?tour=ATP',\s*\{\s*auth:\s*false\s*\}\)/);
+        expect(scoresSrc).toMatch(/apiFetch\(`\/api\/hub\?tour=\$\{encodeURIComponent\(tour\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
+        expect(liveSrc).toMatch(/apiFetch\(`\/api\/livescore\?tour=\$\{encodeURIComponent\(t\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
+        expect(scoresSrc).not.toMatch(/\/api\/fixtures/);
+        expect(liveSrc).not.toMatch(/\/api\/fixtures/);
+    });
+});
+
+describe('parseTour allowlist', () => {
+    const chunk = src.match(/function parseTour\(value\) \{[\s\S]*?\n\}/);
+    if (!chunk) throw new Error('parseTour not found');
+    const parseTour = new Function('return ' + chunk[0])();
+
+    it('accepts only ATP and WTA', () => {
+        expect(parseTour('ATP')).toBe('ATP');
+        expect(parseTour('wta')).toBe('WTA');
+        expect(parseTour(' WTA ')).toBe('WTA');
+    });
+
+    it('ignores junk and never returns raw input', () => {
+        expect(parseTour('<img src=x onerror=alert(1)>')).toBe(null);
+        expect(parseTour('ITF')).toBe(null);
+        expect(parseTour('atp;drop')).toBe(null);
+        expect(parseTour('')).toBe(null);
+        expect(parseTour(null)).toBe(null);
+    });
+});
+
+describe('isoDateLocal', () => {
+    const chunk = src.match(/function isoDateLocal\(date\) \{[\s\S]*?\n\}/);
+    if (!chunk) throw new Error('isoDateLocal not found');
+    const isoDateLocal = new Function('return ' + chunk[0])();
+
+    it('formats local calendar dates without UTC shift', () => {
+        const d = new Date(2026, 8, 1); // Sep 1 local
+        expect(isoDateLocal(d)).toBe('2026-09-01');
+        const late = new Date(2026, 0, 31, 23, 30);
+        expect(isoDateLocal(late)).toBe('2026-01-31');
     });
 });

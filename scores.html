@@ -4,17 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TennisWorld — Scores</title>
-    <meta name="description" content="Live tennis scores and recent results. ATP updates throughout the day.">
+    <meta name="description" content="Live tennis scores and recent results. ATP and WTA updates throughout the day.">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://tennisworld.dev/scores.html">
     <meta property="og:type"        content="website">
     <meta property="og:url"         content="https://tennisworld.dev/scores.html">
     <meta property="og:title"       content="TennisWorld — Scores">
-    <meta property="og:description" content="Live tennis scores and recent results. ATP updates throughout the day.">
+    <meta property="og:description" content="Live tennis scores and recent results. ATP and WTA updates throughout the day.">
     <meta property="og:image"       content="https://tennisworld.dev/screenshots/scores.png">
     <meta name="twitter:card"        content="summary_large_image">
     <meta name="twitter:title"       content="TennisWorld — Scores">
-    <meta name="twitter:description" content="Live tennis scores and recent results. ATP updates throughout the day.">
+    <meta name="twitter:description" content="Live tennis scores and recent results. ATP and WTA updates throughout the day.">
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles.css">
     <link rel="manifest" href="manifest.json">
@@ -45,11 +45,11 @@
                 </span>
             </button>
             <ul class="nav-menu" id="navMenu">
-                <li><a href="index.html" class="nav-link">Home</a></li>
+                <li><a href="index.html" class="nav-link">Curves</a></li>
+                <li><a href="scores.html" class="nav-link nav-link-scores">Scores<span class="nav-live-dot" hidden></span></a></li>
                 <li><a href="draws.html" class="nav-link">Calendar</a></li>
                 <li><a href="rankings.html" class="nav-link">Rankings</a></li>
                 <li><a href="analytics.html" class="nav-link">Analytics</a></li>
-                <li><a href="scores.html" class="nav-link">Scores</a></li>
             </ul>
             <div class="nav-chrome">
                 <button class="nav-theme-toggle" id="themeToggle" aria-label="Toggle dark mode">
@@ -79,12 +79,11 @@
         </div>
     </div>
 
-    <!-- Tournament Hub -->
-    <section id="home" class="tournament-hub">
+    <section id="home" class="tournament-hub scores-digest">
         <div class="hub-container">
             <div class="hub-header">
                 <div class="hub-title-group">
-                    <p class="hub-eyebrow">Live &amp; recent</p>
+                    <p class="hub-eyebrow" id="hubEyebrow">Scores</p>
                     <h1 class="hub-title" id="hubTournamentName">Scores</h1>
                     <p class="section-subtitle" id="hubPageSub">ATP scores update as matches progress.</p>
                     <div class="hub-meta-row" id="hubMeta">
@@ -97,33 +96,56 @@
                 </div>
             </div>
 
-            <div class="hub-match-featured" id="hubFeaturedMatch" aria-live="polite" aria-label="Featured match">
-                <div style="text-align:center;padding:2rem;color:#999;font-size:.875rem;">Loading match data…</div>
+            <div class="digest-toolbar" id="digestToolbar">
+                <div class="tour-toggle" id="tourToggle" role="group" aria-label="Tour">
+                    <button type="button" class="tour-btn" data-tour="ATP" aria-pressed="true">ATP</button>
+                    <button type="button" class="tour-btn" data-tour="WTA" aria-pressed="false">WTA</button>
+                </div>
+                <div class="digest-chips" id="digestChips" role="tablist" aria-label="Match filter">
+                    <button type="button" class="digest-chip is-active" data-filter="all" aria-pressed="true">All</button>
+                    <button type="button" class="digest-chip" data-filter="live" aria-pressed="false">Live <span class="digest-chip-count" data-count-for="live">0</span></button>
+                    <button type="button" class="digest-chip" data-filter="upcoming" aria-pressed="false">Upcoming</button>
+                    <button type="button" class="digest-chip" data-filter="finished" aria-pressed="false">Finished</button>
+                </div>
+                <div class="digest-status">
+                    <span class="live-status-pill" id="liveStatusPill">No live matches</span>
+                    <span class="digest-updated" id="digestUpdated" aria-live="polite"></span>
+                </div>
             </div>
 
-            <div class="hub-lower">
-                <div class="hub-latest-wrap">
-                    <div class="hub-latest-label">Latest Result</div>
-                    <div id="hubLatestResult" class="hub-latest-result" role="status" aria-live="polite">—</div>
+            <div class="digest-layout">
+                <div class="digest-main">
+                    <section class="todays-section digest-todays" id="todaysSection" hidden>
+                        <div class="todays-header">
+                            <h2 class="todays-title" id="todaysTitle">Today's Matches</h2>
+                        </div>
+                        <div class="todays-grid" id="todaysGrid"></div>
+                    </section>
                 </div>
-                <div class="hub-tstats" id="hubH2HStats">
-                    <div class="tstat-item">
-                        <span class="tstat-val">—</span>
-                        <span class="tstat-label">H2H</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
 
-    <!-- Today's Matches -->
-    <section class="todays-section" id="todaysSection" hidden>
-        <div class="hub-container">
-            <div class="todays-header">
-                <h2 class="todays-title" id="todaysTitle">Today's Matches</h2>
-                <span class="live-status-pill" id="liveStatusPill">No live matches</span>
+                <aside class="digest-context" id="digestContext">
+                    <details class="digest-accordion" id="digestAccordion">
+                        <summary class="digest-accordion-summary">Latest &amp; H2H</summary>
+                        <div class="digest-accordion-body">
+                            <div class="hub-match-featured" id="hubFeaturedMatch" aria-live="polite" aria-label="Featured match">
+                                <div class="digest-loading">Loading match data…</div>
+                            </div>
+                            <div class="hub-lower">
+                                <div class="hub-latest-wrap">
+                                    <div class="hub-latest-label">Latest Result</div>
+                                    <div id="hubLatestResult" class="hub-latest-result" role="status" aria-live="polite">—</div>
+                                </div>
+                                <div class="hub-tstats" id="hubH2HStats">
+                                    <div class="tstat-item">
+                                        <span class="tstat-val">—</span>
+                                        <span class="tstat-label">H2H</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+                </aside>
             </div>
-            <div class="todays-grid" id="todaysGrid"></div>
         </div>
     </section>
 

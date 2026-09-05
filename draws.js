@@ -113,7 +113,28 @@ function cleanRound(round) {
 
 // ── Date helpers ───────────────────────────────────────────────────────────
 function isoString(date) {
-    return date.toISOString().split('T')[0];
+    return typeof isoDateLocal === 'function'
+        ? isoDateLocal(date)
+        : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+// A tournament belongs in `month` when its dates overlap that month.
+// Live events that started earlier (empty endDate) stay in the current month.
+function tournamentOverlapsMonth(t, year, month) {
+    const startIso = t && t.startDate;
+    if (!startIso) return true;
+    const start = new Date(String(startIso).slice(0, 10) + 'T00:00:00');
+    if (isNaN(start.getTime())) return true;
+    const monthStart = new Date(year, month - 1, 1);
+    const monthEnd = new Date(year, month, 0);
+    const endRaw = t.endDate && String(t.endDate).trim();
+    if (endRaw) {
+        const end = new Date(endRaw.slice(0, 10) + 'T00:00:00');
+        if (!isNaN(end.getTime())) return start <= monthEnd && end >= monthStart;
+    }
+    if (start >= monthStart && start <= monthEnd) return true;
+    if (start < monthStart && (t.status === 'live' || Number(t.live) > 0)) return true;
+    return false;
 }
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -127,6 +148,29 @@ const monthCache = {};
 document.addEventListener('DOMContentLoaded', () => {
 
     // ── Build accordion + month strip ──────────────────────────────────────
+    // Strip is the source of truth: the visible list is the selected month only.
+    let selectedMonth = null;
+
+    function selectMonth(month, year) {
+        selectedMonth = month;
+        const strip = document.getElementById('calMonthStrip');
+        strip?.querySelectorAll('.cal-month-tab').forEach(t => {
+            t.classList.toggle('active', Number(t.dataset.month) === month);
+        });
+        document.querySelectorAll('.cal-month').forEach(el => {
+            const m = Number(el.dataset.month);
+            const on = m === month;
+            el.hidden = !on;
+            const header = el.querySelector('.cal-month-header');
+            const body = el.querySelector('.cal-month-body');
+            if (!header || !body) return;
+            header.classList.toggle('is-open', on);
+            body.style.display = on ? '' : 'none';
+        });
+        const cacheKey = `${year}-${month}-${calTour}`;
+        if (!monthCache[cacheKey]) loadMonth(month, year);
+    }
+
     function buildAccordion(year) {
         const container = document.getElementById('calMonths');
         const strip     = document.getElementById('calMonthStrip');
@@ -136,64 +180,68 @@ document.addEventListener('DOMContentLoaded', () => {
         const today        = new Date();
         const currentMonth = today.getMonth() + 1;
         const currentYear  = today.getFullYear();
+        const initialMonth = (year === currentYear) ? currentMonth : 1;
 
         for (let m = 1; m <= 12; m++) {
-            const isCurrentMonth = (year === currentYear && m === currentMonth);
+            const isSelected = m === initialMonth;
 
             // Month strip tab
             const tab = document.createElement('button');
-            tab.className   = `cal-month-tab${isCurrentMonth ? ' active' : ''}`;
+            tab.type = 'button';
+            tab.className   = `cal-month-tab${isSelected ? ' active' : ''}`;
             tab.textContent = MONTH_NAMES[m - 1].slice(0, 3).toUpperCase();
-            tab.dataset.month = m;
-            tab.addEventListener('click', () => {
-                strip.querySelectorAll('.cal-month-tab').forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                const body = document.getElementById(`calBody-${m}`);
-                if (body && body.style.display === 'none') toggleMonth(m, year);
-                document.querySelector(`.cal-month[data-month="${m}"]`)
-                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            });
+            tab.dataset.month = String(m);
+            tab.addEventListener('click', () => selectMonth(m, year));
             strip.appendChild(tab);
 
             // Month section
             const monthEl = document.createElement('div');
             monthEl.className   = 'cal-month';
-            monthEl.dataset.month = m;
-            monthEl.innerHTML = `
-                <button class="cal-month-header ${isCurrentMonth ? 'is-open' : ''}" data-month="${m}">
-                    <div class="cal-month-header-left">
-                        <span class="cal-month-name">${MONTH_NAMES[m - 1]}</span>
-                        <span class="cal-month-count" id="calCount-${m}"></span>
-                    </div>
-                    <span class="cal-month-chevron">›</span>
-                </button>
-                <div class="cal-month-body" id="calBody-${m}" style="${isCurrentMonth ? '' : 'display:none'}">
-                    ${isCurrentMonth ? '<div class="cal-month-loading">Loading…</div>' : ''}
-                </div>`;
+            monthEl.dataset.month = String(m);
+            monthEl.hidden = !isSelected;
+            const header = document.createElement('button');
+            header.type = 'button';
+            header.className = `cal-month-header${isSelected ? ' is-open' : ''}`;
+            header.dataset.month = String(m);
+            const headerLeft = document.createElement('div');
+            headerLeft.className = 'cal-month-header-left';
+            headerLeft.appendChild(Object.assign(document.createElement('span'), {
+                className: 'cal-month-name',
+                textContent: MONTH_NAMES[m - 1],
+            }));
+            const count = document.createElement('span');
+            count.className = 'cal-month-count';
+            count.id = `calCount-${m}`;
+            headerLeft.appendChild(count);
+            header.appendChild(headerLeft);
+            const chevron = document.createElement('span');
+            chevron.className = 'cal-month-chevron';
+            chevron.textContent = '›';
+            header.appendChild(chevron);
 
+            const body = document.createElement('div');
+            body.className = 'cal-month-body';
+            body.id = `calBody-${m}`;
+            body.style.display = isSelected ? '' : 'none';
+            if (isSelected) {
+                const loading = document.createElement('div');
+                loading.className = 'cal-month-loading';
+                loading.textContent = 'Loading…';
+                body.appendChild(loading);
+            }
+
+            monthEl.appendChild(header);
+            monthEl.appendChild(body);
             container.appendChild(monthEl);
 
-            monthEl.querySelector('.cal-month-header')
-                .addEventListener('click', () => toggleMonth(m, year));
-
-            if (isCurrentMonth) loadMonth(m, year);
+            header.addEventListener('click', () => selectMonth(m, year));
         }
+
+        selectMonth(initialMonth, year);
     }
 
     function toggleMonth(month, year) {
-        const header = document.querySelector(`.cal-month-header[data-month="${month}"]`);
-        const body   = document.getElementById(`calBody-${month}`);
-        const isOpen = header.classList.contains('is-open');
-
-        if (isOpen) {
-            header.classList.remove('is-open');
-            body.style.display = 'none';
-        } else {
-            header.classList.add('is-open');
-            body.style.display = '';
-            const cacheKey = `${year}-${month}-${calTour}`;
-            if (!monthCache[cacheKey]) loadMonth(month, year);
-        }
+        selectMonth(month, year);
     }
 
     // ── Load a month's tournaments ─────────────────────────────────────────
@@ -218,7 +266,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const raw = await apiFetch(
                 `/api/calendar?tour=${calTour}&dateStart=${isoString(firstDay)}&dateStop=${isoString(lastDay)}`
             );
-            const tournaments = Array.isArray(raw) ? raw : [];
+            const tournaments = (Array.isArray(raw) ? raw : [])
+                .filter(t => tournamentOverlapsMonth(t, year, month));
 
             // Sort by category tier then start date
             tournaments.sort((a, b) => {

@@ -15,6 +15,40 @@ const API_BASE = (() => {
 // Public GET paths that must never send Authorization (tokens in access logs).
 const PUBLIC_GET_PATHS = ['/api/hub', '/api/livescore', '/api/calendar'];
 
+// Tour allowlist — ATP|WTA only. Same contract as API parseTour.
+// Never interpolate the raw stored/query value into HTML.
+function parseTour(value) {
+    const t = String(value == null ? '' : value).trim().toUpperCase();
+    return t === 'ATP' || t === 'WTA' ? t : null;
+}
+
+function readStoredTour() {
+    try {
+        return parseTour(localStorage.getItem('tw-tour'));
+    } catch {
+        return null;
+    }
+}
+
+function writeStoredTour(tour) {
+    const allowed = parseTour(tour);
+    if (!allowed) return null;
+    try { localStorage.setItem('tw-tour', allowed); } catch { /* ignore quota */ }
+    return allowed;
+}
+
+function resolveTour(queryValue) {
+    return parseTour(queryValue) || readStoredTour() || 'ATP';
+}
+
+// Local calendar date → YYYY-MM-DD (never toISOString — that shifts the day).
+function isoDateLocal(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
 function apiPathname(path) {
     return String(path || '').split('?')[0];
 }
