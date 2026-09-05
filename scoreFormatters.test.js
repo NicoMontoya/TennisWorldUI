@@ -32,12 +32,12 @@ describe('formatSetScore', () => {
 
 // ── formatSetScores ────────────────────────────────────────────────────────────
 describe('formatSetScores', () => {
-    it('formats multiple sets comma-separated', () => {
+    it('formats multiple sets in tennis notation', () => {
         const sets = [
             { p1: 6, p2: 1, tiebreak: null },
             { p1: 6, p2: 2, tiebreak: null },
         ];
-        expect(formatSetScores(sets)).toBe('6-1, 6-2');
+        expect(formatSetScores(sets)).toBe('6-1 6-2');
     });
 
     it('handles a three-set match with tiebreak', () => {
@@ -46,7 +46,15 @@ describe('formatSetScores', () => {
             { p1: 6, p2: 7, tiebreak: { p1: 4, p2: 7 } },
             { p1: 6, p2: 3, tiebreak: null },
         ];
-        expect(formatSetScores(sets)).toBe('6-4, 6-7(4), 6-3');
+        expect(formatSetScores(sets)).toBe('6-4 6-7(4) 6-3');
+    });
+
+    it('matches the Scores row example format', () => {
+        expect(formatSetScores([
+            { p1: 6, p2: 4, tiebreak: null },
+            { p1: 3, p2: 6, tiebreak: null },
+            { p1: 7, p2: 6, tiebreak: { p1: 7, p2: 5 } },
+        ])).toBe('6-4 3-6 7-6(5)');
     });
 
     it('returns empty string for empty/null input', () => {

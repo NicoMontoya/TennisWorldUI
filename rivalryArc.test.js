@@ -82,29 +82,30 @@ describe('mount surfaces', () => {
         expect(panelSrc).toMatch(/TW\.RivalryArc\.mount/);
     });
 
-    it('Scores mounts under featured H2H and hides without keys+h2h', () => {
-        expect(scoresHtml).toMatch(/hubRivalryArc/);
+    it('Scores does not mount RivalryArc; Analytics and player panel keep it', () => {
+        expect(scoresHtml).not.toMatch(/hubRivalryArc/);
+        expect(scoresHtml).not.toMatch(/RivalryArc/);
         expect(scoresHtml).not.toMatch(/chart\.js/i);
-        expect(scoresSrc).toMatch(/TW\.RivalryArc\.mount/);
-        expect(scoresSrc).toMatch(/hubRivalryArc/);
+        expect(scoresSrc).not.toMatch(/TW\.RivalryArc/);
+        expect(scoresSrc).not.toMatch(/hubRivalryArc/);
     });
 });
 
-describe('home overlap security', () => {
-    it('parses digit ids only and paints chips/captions via textContent', () => {
-        expect(homeSrc).toMatch(/parseOverlapQuery/);
-        expect(homeSrc).toMatch(/eraTwin/);
+describe('home has no Peak Overlap leftovers', () => {
+    it('drops overlap view, deep-links, and era-twin chips', () => {
+        expect(homeSrc).not.toMatch(/parseOverlapQuery/);
+        expect(homeSrc).not.toMatch(/eraTwin/);
+        expect(homeSrc).not.toMatch(/PeakOverlap/);
+        expect(homeSrc).not.toMatch(/overlap=/);
         expect(homeSrc).toMatch(/textContent/);
-        expect(homeSrc).not.toMatch(/overlapEl\.innerHTML/);
-        expect(homeSrc).not.toMatch(/eraTwins\.innerHTML/);
     });
 });
 
-describe('service worker tw-v37', () => {
-    it('bumps cache and precaches new UI assets', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v37'/);
-        expect(swSrc).not.toMatch(/tw-v36/);
-        expect(swSrc).toMatch(/'\/peakOverlap\.js'/);
+describe('service worker tw-v38', () => {
+    it('bumps cache and drops peakOverlap from the shell', () => {
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v38'/);
+        expect(swSrc).not.toMatch(/tw-v37/);
+        expect(swSrc).not.toMatch(/peakOverlap/);
         expect(swSrc).toMatch(/'\/components\/RivalryArc\.js'/);
     });
 });

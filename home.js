@@ -7,15 +7,12 @@
 // Metric toggle re-maps the already-fetched points — no refetch.
 // Selection persists in localStorage (tw-vintage-players); colors follow the
 // player (slot stored with selection), never their position in the list.
-// Overlap view: peak bands + intersection hatch from ranking-history (fallback:
-// vintage points). Deep link /?overlap=id,id — digits only.
 
 document.addEventListener('DOMContentLoaded', () => {
 
     const STORAGE_KEY   = 'tw-vintage-players';
     const TOUR          = 'ATP';
     const MAX_CONCURRENT = 3;
-    const Peak = (typeof TW !== 'undefined' && TW.PeakOverlap) ? TW.PeakOverlap : null;
 
     // Categorical palette — validated (dataviz six-checks) against #ffffff and
     // #1c2333 card surfaces. Slot order is the CVD-safety mechanism; do not sort.
@@ -33,15 +30,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let roster    = [];            // [{position,id,name,countryAcr}]
     let selection = [];            // [{id,name,slot}]
     let curves    = new Map();     // id → { player, points, totals } | { error }
-    let rankHist  = new Map();     // id → { history } | { error }
     let metric    = 'w';
     let chart     = null;
-    let view      = 'curves';      // curves | overlap
-    let twinHintIds = [];
-
-    const params = new URLSearchParams(window.location.search);
-    const deepOverlapIds = Peak ? Peak.parseOverlapQuery(params.get('overlap')) : [];
-    if (deepOverlapIds.length >= 2) view = 'overlap';
 
     const els = {
         loading: document.getElementById('vintageLoading'),
@@ -51,16 +41,9 @@ document.addEventListener('DOMContentLoaded', () => {
         datalist: document.getElementById('rosterList'),
         reset:   document.getElementById('resetTop10'),
         toggle:  document.getElementById('metricToggle'),
-        viewToggle: document.getElementById('viewToggle'),
         note:    document.getElementById('vintageNote'),
         sub:     document.getElementById('vintageSub'),
         chartWrap: document.getElementById('vintageChartWrap'),
-        overlapWrap: document.getElementById('overlapWrap'),
-        overlapEmpty: document.getElementById('overlapEmpty'),
-        overlapChart: document.getElementById('overlapChart'),
-        overlapCaption: document.getElementById('overlapCaption'),
-        eraTwinsLabel: document.getElementById('eraTwinsLabel'),
-        eraTwinChips: document.getElementById('eraTwinChips'),
     };
 
     // ── Theme-aware chart chrome ──────────────────────────────────────────────
@@ -115,28 +98,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     inFlight--;
                     syncChart();     // progressive: each resolved player appears immediately
                     pump();
-                });
-        }
-    }
-
-    const histQueue = [];
-    let histInFlight = 0;
-    function enqueueHist(playerId) {
-        if (rankHist.has(playerId)) { renderOverlap(); return; }
-        histQueue.push(playerId);
-        pumpHist();
-    }
-    function pumpHist() {
-        while (histInFlight < MAX_CONCURRENT && histQueue.length) {
-            const id = histQueue.shift();
-            histInFlight++;
-            apiFetch(`/api/player-ranking-history?tour=${TOUR}&playerKey=${encodeURIComponent(id)}`)
-                .then(data => { rankHist.set(id, data || { history: [] }); })
-                .catch(()  => { rankHist.set(id, { error: 'fetch-failed', history: [] }); })
-                .finally(() => {
-                    histInFlight--;
-                    renderOverlap();
-                    pumpHist();
                 });
         }
     }
@@ -236,261 +197,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         renderChips();
         renderNote();
-        applyView();
-        if (view === 'overlap') {
-            selection.forEach(p => enqueueHist(p.id));
-            renderOverlap();
-        }
-    }
-
-    // ── View toggle ───────────────────────────────────────────────────────────
-    function setView(next, fromKeyboard) {
-        if (next !== 'curves' && next !== 'overlap') return;
-        if (view === next && !fromKeyboard) return;
-        view = next;
-        if (els.viewToggle) {
-            els.viewToggle.querySelectorAll('.view-btn').forEach(b => {
-                const on = b.dataset.view === view;
-                b.classList.toggle('active', on);
-                b.setAttribute('aria-selected', String(on));
-                b.tabIndex = on ? 0 : -1;
-            });
-        }
-        applyView();
-        if (view === 'overlap') {
-            selection.forEach(p => enqueueHist(p.id));
-            prefetchTwinCandidates();
-            renderOverlap();
-        }
-    }
-
-    function applyView() {
-        const overlap = view === 'overlap';
-        if (els.chartWrap) els.chartWrap.hidden = overlap;
-        if (els.overlapWrap) els.overlapWrap.hidden = !overlap;
-        if (els.toggle) els.toggle.setAttribute('aria-hidden', overlap ? 'true' : 'false');
-    }
-
-    function playerWindow(p) {
-        if (!Peak) return null;
-        const hist = rankHist.get(p.id);
-        const cv = curves.get(p.id);
-        const birthday = cv && cv.player && (cv.player.birthday || cv.player.birthdate);
-        if (!hist && !(cv && cv.points)) return null;
-        return Peak.resolvePeakWindow(hist, cv && cv.points, birthday);
-    }
-
-    function renderOverlap() {
-        if (view !== 'overlap' || !els.overlapChart || !Peak) return;
-
-        if (selection.length < 2) {
-            if (els.overlapEmpty) {
-                els.overlapEmpty.hidden = false;
-                els.overlapEmpty.textContent = 'Add at least two players to see peak overlap.';
-            }
-            els.overlapChart.hidden = true;
-            els.overlapChart.replaceChildren();
-            if (els.overlapCaption) els.overlapCaption.textContent = '';
-            renderEraTwins([]);
-            return;
-        }
-
-        if (els.overlapEmpty) {
-            els.overlapEmpty.hidden = true;
-            els.overlapEmpty.textContent = '';
-        }
-
-        const ready = selection.map(p => ({ player: p, window: playerWindow(p) }));
-        const pending = selection.some(p => !curves.has(p.id) && !rankHist.has(p.id));
-        const withYears = ready.filter(r => r.window && r.window.startYear != null && r.window.endYear != null);
-
-        if (!withYears.length) {
-            els.overlapChart.hidden = true;
-            els.overlapChart.replaceChildren();
-            if (els.overlapCaption) {
-                els.overlapCaption.textContent = pending
-                    ? 'Loading peak windows…'
-                    : 'No peak-year data for the selected players.';
-            }
-            renderEraTwins([]);
-            return;
-        }
-
-        const intersection = Peak.intersectAll(withYears.map(r => r.window));
-        if (els.overlapCaption) {
-            els.overlapCaption.textContent = Peak.overlapCaption(
-                withYears.map(r => r.player),
-                intersection
-            );
-        }
-        paintOverlapSvg(withYears, intersection);
-        suggestTwinsFrom(withYears[0].window);
-    }
-
-    function paintOverlapSvg(rows, intersection) {
-        const host = els.overlapChart;
-        host.hidden = false;
-        host.replaceChildren();
-
-        const years = [];
-        rows.forEach(r => {
-            years.push(r.window.startYear, r.window.endYear);
-        });
-        if (intersection) years.push(intersection.startYear, intersection.endYear);
-        let minY = Math.min.apply(null, years);
-        let maxY = Math.max.apply(null, years);
-        if (minY === maxY) { minY -= 1; maxY += 1; }
-        const pad = 1;
-        minY -= pad;
-        maxY += pad;
-        const span = Math.max(1, maxY - minY);
-
-        const W = 720;
-        const rowH = 36;
-        const top = 28;
-        const bottom = 28;
-        const left = 8;
-        const right = 120;
-        const H = top + rows.length * rowH + bottom;
-        const innerW = W - left - right;
-
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-        svg.setAttribute('class', 'overlap-svg');
-        svg.setAttribute('role', 'img');
-        svg.setAttribute('aria-label', els.overlapCaption ? els.overlapCaption.textContent : 'Peak overlap');
-        svg.setAttribute('width', '100%');
-        svg.setAttribute('height', String(Math.max(160, H)));
-
-        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-        const pat = document.createElementNS('http://www.w3.org/2000/svg', 'pattern');
-        pat.setAttribute('id', 'twOverlapHatch');
-        pat.setAttribute('patternUnits', 'userSpaceOnUse');
-        pat.setAttribute('width', '7');
-        pat.setAttribute('height', '7');
-        const hatch = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        hatch.setAttribute('d', 'M0 7 L7 0');
-        hatch.setAttribute('class', 'overlap-hatch-stroke');
-        pat.appendChild(hatch);
-        defs.appendChild(pat);
-        svg.appendChild(defs);
-
-        function xOf(year) {
-            return left + ((year - minY) / span) * innerW;
-        }
-
-        for (let y = minY; y <= maxY; y++) {
-            if ((y - minY) % Math.ceil(span / 6) !== 0 && y !== maxY) continue;
-            const tx = xOf(y);
-            const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            tick.setAttribute('x1', tx);
-            tick.setAttribute('x2', tx);
-            tick.setAttribute('y1', top - 8);
-            tick.setAttribute('y2', H - bottom + 4);
-            tick.setAttribute('class', 'overlap-grid');
-            svg.appendChild(tick);
-            const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            label.setAttribute('x', tx);
-            label.setAttribute('y', H - 8);
-            label.setAttribute('class', 'overlap-axis-label');
-            label.setAttribute('text-anchor', 'middle');
-            label.textContent = String(y);
-            svg.appendChild(label);
-        }
-
-        rows.forEach((r, i) => {
-            const y = top + i * rowH + 10;
-            const x1 = xOf(r.window.startYear);
-            const x2 = Math.max(x1 + 8, xOf(r.window.endYear + 1));
-            const band = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            band.setAttribute('x', x1);
-            band.setAttribute('y', y);
-            band.setAttribute('width', x2 - x1);
-            band.setAttribute('height', 16);
-            band.setAttribute('rx', '3');
-            band.setAttribute('class', i % 2 === 0 ? 'overlap-band-a' : 'overlap-band-b');
-            svg.appendChild(band);
-
-            if (intersection) {
-                const ix1 = xOf(intersection.startYear);
-                const ix2 = Math.max(ix1 + 6, xOf(intersection.endYear + 1));
-                const hit = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                hit.setAttribute('x', ix1);
-                hit.setAttribute('y', y);
-                hit.setAttribute('width', ix2 - ix1);
-                hit.setAttribute('height', 16);
-                hit.setAttribute('rx', '3');
-                hit.setAttribute('class', 'overlap-intersect');
-                svg.appendChild(hit);
-            }
-
-            const name = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            name.setAttribute('x', W - right + 8);
-            name.setAttribute('y', y + 13);
-            name.setAttribute('class', 'overlap-player-label');
-            name.textContent = r.player.name || '';
-            svg.appendChild(name);
-        });
-
-        host.appendChild(svg);
-    }
-
-    function prefetchTwinCandidates() {
-        if (!roster.length) return;
-        const selected = new Set(selection.map(p => String(p.id)));
-        const focus = selection[0];
-        const legends = roster.filter(r => r.legend && !selected.has(String(r.id)));
-        const top = roster.filter(r => !r.legend && !selected.has(String(r.id))).slice(0, 12);
-        const candidates = legends.concat(top).slice(0, 14);
-        twinHintIds = candidates.map(c => String(c.id));
-        candidates.forEach(c => {
-            enqueue(c.id);
-            enqueueHist(c.id);
-        });
-        if (focus) enqueueHist(focus.id);
-    }
-
-    function suggestTwinsFrom(focusWindow) {
-        if (!Peak || !focusWindow) {
-            renderEraTwins([]);
-            return;
-        }
-        const selected = new Set(selection.map(p => String(p.id)));
-        const candidates = roster
-            .filter(r => !selected.has(String(r.id)) && twinHintIds.includes(String(r.id)))
-            .map(r => ({
-                id: r.id,
-                name: r.name,
-                window: playerWindow({ id: r.id }),
-            }))
-            .filter(c => c.window);
-        renderEraTwins(Peak.suggestEraTwins(focusWindow, candidates, 6));
-    }
-
-    function renderEraTwins(twins) {
-        if (els.eraTwinsLabel) {
-            els.eraTwinsLabel.textContent = twins.length ? 'Era twins' : '';
-        }
-        if (!els.eraTwinChips) return;
-        els.eraTwinChips.replaceChildren();
-        twins.forEach(t => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'era-twin-chip';
-            btn.dataset.id = String(t.id);
-            const name = document.createElement('span');
-            name.className = 'era-twin-name';
-            name.textContent = t.name || t.id;
-            const meta = document.createElement('span');
-            meta.className = 'era-twin-meta';
-            meta.textContent = t.startYear === t.endYear
-                ? String(t.startYear)
-                : t.startYear + '–' + t.endYear;
-            btn.appendChild(name);
-            btn.appendChild(meta);
-            btn.setAttribute('aria-label', 'Add ' + (t.name || t.id) + ' as an era twin');
-            els.eraTwinChips.appendChild(btn);
-        });
     }
 
     // ── Chips (legend + remove) ───────────────────────────────────────────────
@@ -544,7 +250,6 @@ document.addEventListener('DOMContentLoaded', () => {
         selection.push({ id: entry.id, name: entry.name, slot: freeSlot() });
         saveSelection();
         enqueue(entry.id);
-        if (view === 'overlap') enqueueHist(entry.id);
         syncChart();
     }
     function removePlayer(id) {
@@ -557,17 +262,6 @@ document.addEventListener('DOMContentLoaded', () => {
         saveSelection();
         selection.forEach(p => enqueue(p.id));
         syncChart();
-    }
-
-    function selectionFromIds(ids) {
-        const picked = [];
-        ids.forEach(id => {
-            const r = roster.find(x => String(x.id) === String(id));
-            if (r && !picked.some(p => String(p.id) === String(r.id))) {
-                picked.push({ id: r.id, name: r.name, slot: picked.length });
-            }
-        });
-        return picked;
     }
 
     // ── Events ────────────────────────────────────────────────────────────────
@@ -599,42 +293,6 @@ document.addEventListener('DOMContentLoaded', () => {
         syncChart();
     });
 
-    if (els.viewToggle) {
-        els.viewToggle.addEventListener('click', e => {
-            const btn = e.target.closest('.view-btn');
-            if (btn) setView(btn.dataset.view);
-        });
-        els.viewToggle.addEventListener('keydown', e => {
-            const tabs = Array.from(els.viewToggle.querySelectorAll('.view-btn'));
-            const i = tabs.indexOf(document.activeElement);
-            if (i < 0) return;
-            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-                e.preventDefault();
-                const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
-                next.focus();
-                setView(next.dataset.view, true);
-            } else if (e.key === 'Home') {
-                e.preventDefault();
-                tabs[0].focus();
-                setView(tabs[0].dataset.view, true);
-            } else if (e.key === 'End') {
-                e.preventDefault();
-                tabs[tabs.length - 1].focus();
-                setView(tabs[tabs.length - 1].dataset.view, true);
-            }
-        });
-    }
-
-    if (els.eraTwinChips) {
-        els.eraTwinChips.addEventListener('click', e => {
-            const btn = e.target.closest('.era-twin-chip');
-            if (!btn) return;
-            const id = btn.dataset.id;
-            const entry = roster.find(r => String(r.id) === String(id));
-            if (entry) addPlayer(entry);
-        });
-    }
-
     // Re-skin the chart when the theme flips (shared.js toggles data-theme).
     new MutationObserver(() => syncChart())
         .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -659,23 +317,13 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        const fromLink = selectionFromIds(deepOverlapIds);
-        if (fromLink.length >= 2) {
-            selection = fromLink;
-            saveSelection();
-            selection.forEach(p => { enqueue(p.id); enqueueHist(p.id); });
-            setView('overlap');
+        const saved = loadSelection();
+        if (saved) {
+            selection = saved;
+            selection.forEach(p => enqueue(p.id));
             syncChart();
         } else {
-            const saved = loadSelection();
-            if (saved) {
-                selection = saved;
-                selection.forEach(p => enqueue(p.id));
-                syncChart();
-            } else {
-                resetToTop10();
-            }
-            if (view === 'overlap') setView('overlap');
+            resetToTop10();
         }
     })();
 });
