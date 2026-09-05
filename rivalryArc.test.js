@@ -64,6 +64,7 @@ describe('streak derivation', () => {
         expect(streak.count).toBe(3);
         expect(api.streakCaption(meetings, 'A', 'B', { player2Name: 'Carlos Alcaraz' }))
             .toBe('Alcaraz — 3-match streak');
+        expect(api.finishedMeetings(meetings, 'A', 'C')).toEqual([]);
     });
 });
 

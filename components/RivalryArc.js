@@ -37,9 +37,16 @@
         return null;
     }
 
-    function finishedMeetings(meetings) {
+    function samePair(match, k1, k2) {
+        const a = String(match && match.player1Key);
+        const b = String(match && match.player2Key);
+        return (a === String(k1) && b === String(k2)) || (a === String(k2) && b === String(k1));
+    }
+
+    function finishedMeetings(meetings, player1Key, player2Key) {
         return (Array.isArray(meetings) ? meetings : [])
             .filter(m => m && (m.status === 'Finished' || m.status === 'finished'))
+            .filter(m => !player1Key || !player2Key || samePair(m, player1Key, player2Key))
             .slice()
             .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
     }
@@ -60,7 +67,7 @@
     }
 
     function deriveStreak(meetings, player1Key, player2Key) {
-        const finished = finishedMeetings(meetings);
+        const finished = finishedMeetings(meetings, player1Key, player2Key);
         if (!finished.length) {
             return { holderKey: null, count: 0, lastWinnerKey: null, label: 'No finished meetings' };
         }
@@ -86,7 +93,7 @@
     }
 
     function streakCaption(meetings, player1Key, player2Key, names) {
-        const finished = finishedMeetings(meetings);
+        const finished = finishedMeetings(meetings, player1Key, player2Key);
         const streak = deriveStreak(finished, player1Key, player2Key);
         const n1 = names && names.player1Name;
         const n2 = names && names.player2Name;
@@ -160,7 +167,7 @@
             el.hidden = true;
             return false;
         }
-        const finished = finishedMeetings(meetings);
+        const finished = finishedMeetings(meetings, player1Key, player2Key);
         if (!finished.length) {
             el.hidden = true;
             return false;
