@@ -58,10 +58,10 @@ describe('LiveEngine tour + idle contract', () => {
     });
 });
 
-describe('service worker tw-v36', () => {
+describe('service worker tw-v37', () => {
     it('bumps cache and still precaches scores.html', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v36'/);
-        expect(swSrc).not.toMatch(/tw-v35/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v37'/);
+        expect(swSrc).not.toMatch(/tw-v36/);
         expect(swSrc).toMatch(/'\/scores\.html'/);
     });
 });
