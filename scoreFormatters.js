@@ -16,10 +16,10 @@ export function formatSetScore(s) {
     return base;
 }
 
-// Format all sets as a comma-separated string: "6-1, 7-6(3), 6-4"
+// Format all sets in typical tennis notation: "6-4 3-6 7-6(5)"
 export function formatSetScores(setScores) {
     if (!setScores || !setScores.length) return '';
-    return setScores.map(formatSetScore).join(', ');
+    return setScores.map(formatSetScore).join(' ');
 }
 
 // Format the current in-game point score.

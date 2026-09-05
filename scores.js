@@ -4,8 +4,80 @@
 // Primary: GET /api/hub (anonymous). Livescore overlay via LiveEngine
 // only while any match isLive. All API strings go through textContent
 // or dataset — never concatenated into innerHTML.
-// Live flash: classList + textContent only. Never rebuild a row from
-// a live payload.
+// Live flash: classList + textContent on score cells only. Never rebuild
+// a row from a live payload. TW Security checklist: textContent/dataset
+// only; no CDN on this page; PUBLIC_GET intact; parseTour allowlist;
+// Peak Overlap fully removed.
+
+function matchKeyOf(m) {
+    if (!m) return '';
+    return String(m.matchKey || m.key || `${m.player1Key || ''}-${m.player2Key || ''}-${m.round || ''}`);
+}
+
+function matchPhase(m) {
+    if (m && m.isLive) return 'live';
+    if (m && m.status === 'Finished') return 'finished';
+    return 'upcoming';
+}
+
+function matchTimeMs(m) {
+    if (!m) return NaN;
+    const raw = m.date || m.startDate || m.time || '';
+    if (!raw) return NaN;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? NaN : d.getTime();
+}
+
+function mergeHubMatches(data) {
+    const map = new Map();
+    function add(m) {
+        if (!m) return;
+        const k = matchKeyOf(m);
+        if (!k) return;
+        const prev = map.get(k);
+        map.set(k, prev ? Object.assign({}, prev, m) : m);
+    }
+    (data && data.todaysMatches ? data.todaysMatches : []).forEach(add);
+    if (data) add(data.featuredMatch);
+    (data && data.recentResults ? data.recentResults : []).forEach(add);
+    return Array.from(map.values());
+}
+
+function sortFlatMatches(matches) {
+    return (matches || []).slice().sort((a, b) => {
+        const pa = matchPhase(a);
+        const pb = matchPhase(b);
+        const order = { live: 0, upcoming: 1, finished: 2 };
+        const d = (order[pa] ?? 9) - (order[pb] ?? 9);
+        if (d !== 0) return d;
+        const ta = matchTimeMs(a);
+        const tb = matchTimeMs(b);
+        if (pa === 'upcoming') {
+            if (!isNaN(ta) && !isNaN(tb) && ta !== tb) return ta - tb;
+            if (!isNaN(ta) && isNaN(tb)) return -1;
+            if (isNaN(ta) && !isNaN(tb)) return 1;
+            return 0;
+        }
+        if (pa === 'finished') {
+            if (!isNaN(ta) && !isNaN(tb) && ta !== tb) return tb - ta;
+            return 0;
+        }
+        return 0;
+    });
+}
+
+function formatMatchClock(m) {
+    if (!m) return '';
+    const clock = m.time ? String(m.time).trim() : '';
+    if (/^\d{1,2}:\d{2}/.test(clock)) return clock.slice(0, 5);
+    if (!m.date) return '';
+    const d = new Date(m.date);
+    if (isNaN(d.getTime())) return '';
+    const raw = String(m.date);
+    const hasTime = raw.includes('T') && !raw.endsWith('T00:00:00') && !raw.endsWith('T00:00:00Z');
+    if (!hasTime) return '';
+    return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
+}
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -13,11 +85,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentTournamentKey  = null;
     let currentTournamentName = '';
     let hubTimer = null;
-    let todaysMatches = [];
+    let flatMatches = [];
     let digestFilter = 'all';
-    let lastLiveKeySet = '';
     let lastUpdatedAt = null;
     let updatedTimer = null;
+    let listMounted = false;
 
     const params = new URLSearchParams(window.location.search);
     let currentTour = resolveTour(params.get('tour'));
@@ -33,23 +105,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function anyLive(matches) {
         return (matches || []).some(m => m && m.isLive);
-    }
-
-    function matchKeyOf(m) {
-        if (!m) return '';
-        return String(m.matchKey || m.key || `${m.player1Key || ''}-${m.player2Key || ''}-${m.round || ''}`);
-    }
-
-    function matchPhase(m) {
-        if (m && m.isLive) return 'live';
-        if (m && m.status === 'Finished') return 'finished';
-        return 'upcoming';
-    }
-
-    function phaseOrder(phase) {
-        if (phase === 'live') return 0;
-        if (phase === 'upcoming') return 1;
-        return 2;
     }
 
     function syncTourQuery(tour) {
@@ -68,6 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
         syncTourQuery(allowed);
         paintTourToggle();
         if (typeof LiveEngine !== 'undefined') LiveEngine.setTour(allowed);
+        listMounted = false;
         loadHub();
     }
 
@@ -79,106 +135,11 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.toggle('is-active', on);
             btn.setAttribute('aria-pressed', String(on));
         });
-        const sub = document.getElementById('hubPageSub');
-        if (sub) {
-            sub.textContent = `${currentTour} scores update as matches progress.`;
-        }
     }
 
-    // ── Ticker ─────────────────────────────────────────────────────────────
-
-    function duplicateTicker(track) {
-        const parent = track.parentElement;
-        parent.querySelectorAll('[aria-hidden="true"]').forEach(n => n.remove());
-        const clone = track.cloneNode(true);
-        clone.setAttribute('aria-hidden', 'true');
-        parent.appendChild(clone);
-    }
-
-    function stampTickerTime() {
-        const node = document.getElementById('tickerUpdated');
-        if (!node) return;
-        node.textContent = `· ${timeAgo(new Date())}`;
-        clearTimeout(stampTickerTime._t);
-        stampTickerTime._t = setTimeout(stampTickerTime, 60_000);
-    }
-
-    function liveKeySet(matches) {
-        return (matches || [])
-            .filter(m => m && m.isLive)
-            .map(matchKeyOf)
-            .filter(Boolean)
-            .sort()
-            .join('|');
-    }
-
-    function fillTickerTrack(track, matches, tournShort) {
-        const frag = document.createDocumentFragment();
-        (matches || []).forEach(m => {
-            const isLive = !!m.isLive;
-            const isDone = m.status === 'Finished';
-            const item = el('span', 'ticker-item' + (isLive ? ' ticker-live' : isDone ? ' ticker-done' : ''));
-
-            const event = el('span', 'ticker-event');
-            event.textContent = `${tournShort} · ${m.round || ''}`;
-            item.appendChild(event);
-
-            const win = matchWinner(m);
-            const versus = document.createTextNode(
-                isDone && win
-                    ? ` ${win === 'p1' ? (m.player1Name || '') : (m.player2Name || '')} def. ${win === 'p1' ? (m.player2Name || '') : (m.player1Name || '')} `
-                    : ` ${m.player1Name || ''} vs ${m.player2Name || ''} `
-            );
-            item.appendChild(versus);
-
-            const tag = el('span', 'ticker-tag' + (isLive ? ' ticker-tag-live' : isDone ? '' : ' ticker-tag-soon'));
-            if (isLive) {
-                tag.textContent = 'Live';
-            } else if (isDone) {
-                tag.textContent = m.setScores?.length
-                    ? formatSetScores(m.setScores)
-                    : (m.finalResult || '');
-            } else {
-                tag.textContent = 'Upcoming';
-            }
-            item.appendChild(tag);
-
-            if (isLive && m.currentGame) {
-                item.appendChild(document.createTextNode(' · '));
-                const game = document.createElement('strong');
-                game.textContent = formatGameScore(m.currentGame);
-                item.appendChild(game);
-            }
-
-            frag.appendChild(item);
-            frag.appendChild(el('span', 'ticker-divider', '|'));
-        });
-        track.replaceChildren(frag);
-    }
-
-    function renderTicker(data) {
-        const tickerEl = document.getElementById('scoreTicker');
-        const track    = document.getElementById('tickerTrack');
-        if (!tickerEl || !track) return;
-
-        if (!data?.tournament || !data?.recentResults?.length) {
-            tickerEl.hidden = true;
-            lastLiveKeySet = '';
-            return;
-        }
-
-        currentTournamentKey  = data.tournament.key;
-        currentTournamentName = data.tournament.name || '';
-        const tournShort = currentTournamentName.includes(' - ')
-            ? currentTournamentName.split(' - ').pop()
-            : currentTournamentName;
-
-        const source = anyLive(data.todaysMatches) ? data.todaysMatches : data.recentResults;
-        fillTickerTrack(track, source, tournShort);
-        duplicateTicker(track);
-        stampTickerTime();
-        lastLiveKeySet = liveKeySet(source);
-        tickerEl.hidden = false;
+    function pageSub(hasLive) {
+        if (hasLive) return `${currentTour} live scores update as matches progress.`;
+        return `${currentTour} scores update as matches progress.`;
     }
 
     // ── Hub helpers ─────────────────────────────────────────────────────────
@@ -191,8 +152,6 @@ document.addEventListener('DOMContentLoaded', () => {
         '1/32-finals': 'R64', '1/64-finals': 'R128',
         'round of 128': 'R128', 'round of 64': 'R64',
     };
-
-    const ROUND_ORDER = { 'Final':1, 'Semifinals':2, 'Quarterfinals':3, 'R16':4, 'R32':5, 'R64':6, 'R128':7 };
 
     function cleanRound(round) {
         if (!round) return '';
@@ -213,134 +172,45 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
-    function tstatItem(value, label) {
-        const item = el('div', 'tstat-item');
-        item.appendChild(el('span', 'tstat-val', value));
-        item.appendChild(el('span', 'tstat-label', label));
-        return item;
+    function isDoublesName(name) {
+        return /[\\/]/.test(String(name || ''));
     }
 
-    function renderH2H(container, h2h, match) {
-        if (!container) return;
-        container.replaceChildren();
-        if (!h2h || !match) {
-            container.appendChild(tstatItem('—', 'H2H'));
-            mountScoresRivalryArc(null, null);
-            return;
-        }
-        const p1Last = (match.player1Name || '').split(' ').pop();
-        const p2Last = (match.player2Name || '').split(' ').pop();
-        container.appendChild(tstatItem(String(h2h.p1Wins ?? '—'), p1Last || 'P1'));
-        const mid = tstatItem(String(h2h.totalMatches ?? ''), 'H2H matches');
-        mid.querySelector('.tstat-val').style.fontSize = '0.8rem';
-        mid.querySelector('.tstat-val').style.opacity = '0.45';
-        container.appendChild(mid);
-        container.appendChild(tstatItem(String(h2h.p2Wins ?? '—'), p2Last || 'P2'));
-        mountScoresRivalryArc(h2h, match);
+    function scoreText(m) {
+        if (m && m.setScores && m.setScores.length) return formatSetScores(m.setScores);
+        return (m && m.finalResult) || '';
     }
 
-    function mountScoresRivalryArc(h2h, match) {
-        const slot = document.getElementById('hubRivalryArc');
-        if (!slot) return;
-        const k1 = match && match.player1Key;
-        const k2 = match && match.player2Key;
-        if (!h2h || !k1 || !k2 || typeof TW === 'undefined' || !TW.RivalryArc) {
-            slot.hidden = true;
-            slot.replaceChildren();
-            return;
-        }
-        const localMeetings = h2h.h2hMatches || h2h.meetings;
-        if (Array.isArray(localMeetings) && localMeetings.length) {
-            const ok = TW.RivalryArc.mount(slot, {
-                meetings: localMeetings,
-                player1Key: k1,
-                player2Key: k2,
-                player1Name: match.player1Name,
-                player2Name: match.player2Name,
-            });
-            if (!ok) { slot.hidden = true; slot.replaceChildren(); }
-            return;
-        }
-        const tour = parseTour(currentTour) || 'ATP';
-        apiFetch(`/api/h2h?playerKeyA=${encodeURIComponent(k1)}&playerKeyB=${encodeURIComponent(k2)}&tour=${encodeURIComponent(tour)}`)
-            .then(data => {
-                const ok = TW.RivalryArc.mount(slot, {
-                    meetings: (data && data.h2hMatches) || [],
-                    player1Key: k1,
-                    player2Key: k2,
-                    player1Name: match.player1Name,
-                    player2Name: match.player2Name,
-                });
-                if (!ok) { slot.hidden = true; slot.replaceChildren(); }
-            })
-            .catch(() => {
-                slot.hidden = true;
-                slot.replaceChildren();
-            });
+    function gameText(m) {
+        if (m && m.isLive && m.currentGame) return formatGameScore(m.currentGame);
+        return '';
     }
 
-    function renderLatestResult(container, matches) {
-        if (!container) return;
-        container.replaceChildren();
-        const finished = (matches || []).filter(m => m.status === 'Finished');
-        if (!finished.length) {
-            container.appendChild(el('span', '', 'No completed matches yet'));
-            container.lastChild.style.color = '#999';
-            return;
-        }
-
-        const m      = finished[0];
-        const winner = matchWinner(m);
-        const p1Won  = winner === 'p1';
-        const wName  = p1Won ? m.player1Name : m.player2Name;
-        const lName  = p1Won ? m.player2Name : m.player1Name;
-        const score  = m.setScores?.length
-            ? formatSetScores(m.setScores)
-            : (() => {
-                const parts = (m.finalResult || '').split(' - ');
-                return parts.length === 2 ? `${parts[0]}–${parts[1]} sets` : '';
-              })();
-
-        container.appendChild(el('span', 'latest-winner', wName || ''));
-        container.appendChild(el('span', 'latest-vs', 'def.'));
-        container.appendChild(el('span', 'latest-loser', lName || ''));
-        if (score) container.appendChild(el('span', 'latest-score', score));
-        container.appendChild(el('span', 'latest-round', cleanRound(m.round)));
-    }
-
-    function featuredEyebrow(featured) {
-        if (!featured) return 'Scores';
-        if (featured.isLive) return 'Live';
-        if (featured.status === 'Finished') return 'Finished';
-        if (featured.status === 'Not Started' || featured.status === '0') return 'Upcoming';
-        return 'Live & recent';
-    }
-
-    function featuredSub(featured) {
-        if (!featured) return '';
-        if (featured.isLive) return 'In progress · Today';
-        if (featured.status === 'Not Started' || featured.status === '0') return 'Coming up';
-        if (featured.status === 'Finished') return 'Most recent';
-        return 'Most recent';
-    }
-
-    function paintSurface(tournament) {
+    function paintHeader(tournament, matches) {
+        const nameEl = document.getElementById('hubTournamentName');
+        const eyeEl  = document.getElementById('hubEyebrow');
+        const subEl  = document.getElementById('hubPageSub');
+        if (eyeEl) eyeEl.textContent = 'Scores';
+        if (nameEl) nameEl.textContent = (tournament && tournament.name) || 'Scores';
+        if (subEl) subEl.textContent = pageSub(anyLive(matches));
         const pill = document.getElementById('hubSurface');
-        if (!pill) return;
-        const raw = tournament?.surface || '';
-        const surface = String(raw).trim();
-        pill.className = 'surface-pill';
-        pill.textContent = surface || '—';
-        if (!surface) return;
-        const cls = surface.toLowerCase();
-        if (cls === 'clay' || cls === 'hard' || cls === 'grass' || cls === 'carpet') {
-            pill.classList.add(cls);
+        if (pill) {
+            const raw = tournament && tournament.surface ? String(tournament.surface).trim() : '';
+            pill.className = 'surface-pill';
+            pill.textContent = raw || '';
+            pill.hidden = !raw;
+            if (raw) {
+                const cls = raw.toLowerCase();
+                if (cls === 'clay' || cls === 'hard' || cls === 'grass' || cls === 'carpet') {
+                    pill.classList.add(cls);
+                }
+            }
         }
     }
 
-    // ── Today's Matches grid ────────────────────────────────────────────────
+    // ── Flat list ──────────────────────────────────────────────────────────
 
-    function filteredTodays(matches) {
+    function filteredMatches(matches) {
         const list = matches || [];
         if (digestFilter === 'all') return list;
         return list.filter(m => matchPhase(m) === digestFilter);
@@ -355,70 +225,89 @@ document.addEventListener('DOMContentLoaded', () => {
         if (liveChip) liveChip.classList.toggle('has-live', liveN > 0);
     }
 
-    function renderTodaysMatches(matches, tournamentName) {
-        const section = document.getElementById('todaysSection');
-        const grid    = document.getElementById('todaysGrid');
-        const title   = document.getElementById('todaysTitle');
-        if (!section || !grid) return;
+    function setFilter(next, rerender) {
+        const allowed = next === 'live' || next === 'upcoming' || next === 'finished' || next === 'all' ? next : null;
+        if (!allowed) return;
+        digestFilter = allowed;
+        const chips = document.getElementById('digestChips');
+        if (chips) {
+            chips.querySelectorAll('.digest-chip').forEach(c => {
+                const on = c.dataset.filter === allowed;
+                c.classList.toggle('is-active', on);
+                c.setAttribute('aria-pressed', String(on));
+            });
+        }
+        if (rerender !== false) renderFlatList(flatMatches);
+    }
 
-        todaysMatches = matches || [];
-        paintDigestCounts(todaysMatches);
+    function renderFlatList(matches) {
+        const section = document.getElementById('scoresSection');
+        const list    = document.getElementById('scoresList');
+        if (!section || !list) return;
 
-        const visible = filteredTodays(todaysMatches);
+        flatMatches = matches || [];
+        paintDigestCounts(flatMatches);
 
-        if (!todaysMatches.length) {
-            section.hidden = true;
-            grid.replaceChildren();
+        const visible = filteredMatches(flatMatches);
+        section.hidden = false;
+
+        if (!flatMatches.length) {
+            const empty = el('div', 'digest-empty', 'No matches to show.');
+            list.replaceChildren(empty);
+            listMounted = false;
             return;
         }
-
-        const shortName = tournamentName
-            ? String(tournamentName).split(' - ').pop().trim()
-            : 'Today';
-        if (title) title.textContent = `Today at ${shortName}`;
 
         if (!visible.length) {
             const empty = el('div', 'digest-empty');
-            empty.textContent = digestFilter === 'live'
-                ? 'No live matches right now.'
-                : digestFilter === 'finished'
-                ? 'No finished matches yet today.'
-                : 'No upcoming matches in this filter.';
-            grid.replaceChildren(empty);
-            section.hidden = false;
+            const msg = el('p', 'digest-empty-msg',
+                digestFilter === 'live' ? 'No live matches right now.'
+                : digestFilter === 'finished' ? 'No finished matches yet.'
+                : 'No upcoming matches in this filter.');
+            const btn = el('button', 'digest-empty-all', 'Show all');
+            btn.type = 'button';
+            btn.addEventListener('click', () => setFilter('all'));
+            empty.appendChild(msg);
+            empty.appendChild(btn);
+            list.replaceChildren(empty);
+            listMounted = false;
             return;
         }
 
-        const groups = {};
-        for (const m of visible) {
-            const r = cleanRound(m.round) || m.round || 'Matches';
-            if (!groups[r]) groups[r] = [];
-            groups[r].push(m);
+        const existing = listMounted ? new Map(
+            Array.from(list.querySelectorAll('.smr[data-match-key]')).map(row => [row.dataset.matchKey, row])
+        ) : null;
+
+        const canPatch = !!(existing && existing.size === visible.length && visible.every(m => existing.has(matchKeyOf(m))));
+        if (canPatch) {
+            visible.forEach(m => applyLiveToRow(existing.get(matchKeyOf(m)), m, { flash: false }));
+            return;
         }
-
-        Object.keys(groups).forEach(round => {
-            groups[round].sort((a, b) => phaseOrder(matchPhase(a)) - phaseOrder(matchPhase(b)));
-        });
-
-        const sortedRounds = Object.keys(groups).sort((a, b) => {
-            return (ROUND_ORDER[a] || 99) - (ROUND_ORDER[b] || 99);
-        });
 
         const frag = document.createDocumentFragment();
-        sortedRounds.forEach(round => {
-            const group = el('div', 'tmr-group');
-            const label = el('div', 'tmr-round-label', round);
-            group.appendChild(label);
-            groups[round].forEach(m => group.appendChild(renderMatchRow(m)));
-            frag.appendChild(group);
-        });
-        grid.replaceChildren(frag);
+        visible.forEach(m => frag.appendChild(renderMatchRow(m)));
+        list.replaceChildren(frag);
+        listMounted = true;
 
         if (typeof TW !== 'undefined' && TW.auth?.bindStarButtons) {
-            TW.auth.bindStarButtons(grid);
+            TW.auth.bindStarButtons(list);
         }
+    }
 
-        section.hidden = false;
+    function playerBlock(side, name, pkey, seed, won, isDone, winner) {
+        const cell = el('span', 'smr-player smr-' + side + (isDoublesName(name) ? ' smr-doubles' : ''));
+        if (seed) cell.appendChild(el('span', 'smr-seed', String(seed)));
+        const pname = el('span', 'smr-name' + (won ? ' smr-won' : '') + (isDone && !won && winner ? ' smr-lost' : ''));
+        pname.textContent = name || '—';
+        if (pkey) {
+            pname.setAttribute('data-open-player', '');
+            pname.dataset.playerKey = String(pkey);
+            pname.dataset.name = name || '';
+            pname.dataset.tour = currentTour;
+            pname.dataset.country = '';
+        }
+        cell.appendChild(pname);
+        return cell;
     }
 
     function renderMatchRow(m) {
@@ -428,67 +317,98 @@ document.addEventListener('DOMContentLoaded', () => {
         const p1Won  = winner === 'p1';
         const p2Won  = winner === 'p2';
         const key    = matchKeyOf(m);
+        const phase  = matchPhase(m);
 
-        const row = el('div', 'tmr' + (isLive ? ' tmr-is-live' : '') + (isDone ? ' tmr-is-done' : ''));
+        const row = el('article', 'smr smr-' + phase + (isLive ? ' smr-is-live' : '') + (isDone ? ' smr-is-done' : ''));
         if (key) row.dataset.matchKey = key;
-        row.dataset.phase = matchPhase(m);
+        row.dataset.phase = phase;
 
-        function playerCell(side, name, pkey, seed, won) {
-            const cell = el('div', side);
-            if (seed) cell.appendChild(el('span', 'tmr-seed', String(seed)));
-            const pname = el('span', 'tmr-pname' + (won ? ' tmr-won' : '') + (isDone && !won && winner ? ' tmr-lost' : ''));
-            pname.textContent = name || '—';
-            if (pkey) {
-                pname.setAttribute('data-open-player', '');
-                pname.dataset.playerKey = String(pkey);
-                pname.dataset.name = name || '';
-                pname.dataset.tour = parseTour(m.tour) || currentTour;
-                pname.dataset.country = '';
-            }
-            cell.appendChild(pname);
-            return cell;
-        }
+        const status = el('div', 'smr-status');
+        const badge = el('span', 'smr-badge');
+        const dot = el('span', 'smr-dot');
+        dot.setAttribute('aria-hidden', 'true');
+        const label = el('span', 'smr-badge-label');
+        badge.appendChild(dot);
+        badge.appendChild(label);
+        status.appendChild(badge);
+        row.appendChild(status);
 
-        row.appendChild(playerCell('tmr-p1', m.player1Name, m.player1Key, m.player1Seed, p1Won));
+        const players = el('div', 'smr-players');
+        players.appendChild(playerBlock('p1', m.player1Name, m.player1Key, m.player1Seed, p1Won, isDone, winner));
+        players.appendChild(el('span', 'smr-vs', 'vs'));
+        players.appendChild(playerBlock('p2', m.player2Name, m.player2Key, m.player2Seed, p2Won, isDone, winner));
+        row.appendChild(players);
 
-        const center = el('div', 'tmr-center');
-        const badge = el('span', 'tmr-badge');
-        const score = el('span', 'tmr-score');
-        const game  = el('span', 'tmr-game');
-        center.appendChild(badge);
-        center.appendChild(score);
-        center.appendChild(game);
-        paintRowCenter(badge, score, game, m);
-        row.appendChild(center);
+        const scores = el('div', 'smr-scores');
+        const sets = el('span', 'smr-sets');
+        const game = el('span', 'smr-game');
+        scores.appendChild(sets);
+        scores.appendChild(game);
+        row.appendChild(scores);
 
-        row.appendChild(playerCell('tmr-p2', m.player2Name, m.player2Key, m.player2Seed, p2Won));
+        const meta = el('div', 'smr-meta');
+        const round = el('span', 'smr-round');
+        const time = el('span', 'smr-time');
+        meta.appendChild(round);
+        meta.appendChild(time);
+        row.appendChild(meta);
+
+        paintRow(row, m, { flash: false });
         return row;
     }
 
-    function paintRowCenter(badge, score, game, m) {
-        const isLive = !!m.isLive;
-        const isDone = m.status === 'Finished';
-        const setText = m.setScores?.length ? formatSetScores(m.setScores) : (m.finalResult || '');
-        const gameText = isLive && m.currentGame ? formatGameScore(m.currentGame) : '';
-
-        if (isLive) {
-            badge.textContent = 'Live';
-            badge.className = 'tmr-badge tmr-badge-live';
-            badge.hidden = false;
-        } else if (isDone) {
-            badge.textContent = '';
-            badge.className = 'tmr-badge';
-            badge.hidden = true;
-        } else {
-            badge.textContent = '—';
-            badge.className = 'tmr-badge tmr-badge-soon';
-            badge.hidden = false;
+    function paintStatus(badge, m) {
+        const phase = matchPhase(m);
+        badge.className = 'smr-badge smr-badge-' + phase;
+        const label = badge.querySelector('.smr-badge-label');
+        if (label) {
+            label.textContent = phase === 'live' ? 'Live' : phase === 'upcoming' ? 'Upcoming' : 'Finished';
         }
+        badge.hidden = false;
+    }
 
-        score.textContent = setText;
-        score.hidden = !setText;
-        game.textContent = gameText;
-        game.hidden = !gameText;
+    function paintRow(row, m, opts) {
+        const flash = !!(opts && opts.flash);
+        const badge = row.querySelector('.smr-badge');
+        const sets  = row.querySelector('.smr-sets');
+        const game  = row.querySelector('.smr-game');
+        const round = row.querySelector('.smr-round');
+        const time  = row.querySelector('.smr-time');
+        if (!badge || !sets || !game) return;
+
+        const phase = matchPhase(m);
+        const isLive = phase === 'live';
+        const isDone = phase === 'finished';
+        row.classList.remove('smr-live', 'smr-upcoming', 'smr-finished', 'smr-is-live', 'smr-is-done');
+        row.classList.add('smr', 'smr-' + phase);
+        row.classList.toggle('smr-is-live', isLive);
+        row.classList.toggle('smr-is-done', isDone);
+        row.dataset.phase = phase;
+
+        paintStatus(badge, m);
+
+        const nextSets = scoreText(m);
+        const nextGame = gameText(m);
+        if (flash) {
+            flashText(sets, nextSets);
+            flashText(game, nextGame);
+        } else {
+            sets.textContent = nextSets;
+            game.textContent = nextGame;
+        }
+        sets.hidden = !nextSets;
+        game.hidden = !nextGame;
+
+        if (round) {
+            const r = cleanRound(m.round);
+            round.textContent = r;
+            round.hidden = !r;
+        }
+        if (time) {
+            const clock = formatMatchClock(m);
+            time.textContent = clock ? '· ' + clock : '';
+            time.hidden = !clock;
+        }
     }
 
     function flashText(node, next) {
@@ -501,44 +421,44 @@ document.addEventListener('DOMContentLoaded', () => {
         node.classList.add('score-flash');
     }
 
-    function applyLiveToRow(row, live) {
-        const badge = row.querySelector('.tmr-badge');
-        const score = row.querySelector('.tmr-score');
-        const game  = row.querySelector('.tmr-game');
-        if (!badge || !score || !game) return;
+    // TW Security #2: live patches existing score cells only. Never remount
+    // the row or interpolate the live payload into HTML.
+    function applyLiveToRow(row, live, opts) {
+        if (!row || !live) return;
+        const flash = !(opts && opts.flash === false);
+        const sets = row.querySelector('.smr-sets');
+        const game = row.querySelector('.smr-game');
+        const badge = row.querySelector('.smr-badge');
+        const label = row.querySelector('.smr-badge-label');
+        const phase = matchPhase(live);
+        const isLive = phase === 'live';
+        const isDone = phase === 'finished';
 
-        const wasLive = row.classList.contains('tmr-is-live');
-        const isLive = !!live.isLive;
-        const isDone = live.status === 'Finished';
+        row.classList.remove('smr-live', 'smr-upcoming', 'smr-finished', 'smr-is-live', 'smr-is-done');
+        row.classList.add('smr', 'smr-' + phase);
+        row.classList.toggle('smr-is-live', isLive);
+        row.classList.toggle('smr-is-done', isDone);
+        row.dataset.phase = phase;
 
-        row.classList.toggle('tmr-is-live', isLive);
-        row.classList.toggle('tmr-is-done', isDone);
-        row.dataset.phase = matchPhase(live);
-
-        if (isLive) {
-            if (badge.textContent !== 'Live') badge.textContent = 'Live';
-            badge.classList.add('tmr-badge-live');
-            badge.classList.remove('tmr-badge-soon');
+        if (badge) {
+            badge.className = 'smr-badge smr-badge-' + phase;
             badge.hidden = false;
-        } else if (isDone) {
-            badge.textContent = '';
-            badge.classList.remove('tmr-badge-live', 'tmr-badge-soon');
-            badge.hidden = true;
+        }
+        if (label) {
+            label.textContent = isLive ? 'Live' : isDone ? 'Finished' : 'Upcoming';
         }
 
-        const setText = live.setScores?.length
-            ? formatSetScores(live.setScores)
-            : (live.finalResult || '');
-        const gameText = isLive && live.currentGame ? formatGameScore(live.currentGame) : '';
-
-        flashText(score, setText);
-        score.hidden = !setText;
-        flashText(game, gameText);
-        game.hidden = !gameText;
-
-        if (!wasLive && isLive) {
-            paintDigestCounts(todaysMatches);
+        const nextSets = scoreText(live);
+        const nextGame = gameText(live);
+        if (flash) {
+            flashText(sets, nextSets);
+            flashText(game, nextGame);
+        } else {
+            if (sets) sets.textContent = nextSets;
+            if (game) game.textContent = nextGame;
         }
+        if (sets) sets.hidden = !nextSets;
+        if (game) game.hidden = !nextGame;
     }
 
     function stampDigestUpdated(iso) {
@@ -566,7 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ── Live updates to the today grid ─────────────────────────────────────
+    // ── Live updates: patch score cells by matchKey, do not remount ────────
     window.addEventListener('tw:live-update', ({ detail }) => {
         const matches = detail?.matches || [];
         stampDigestUpdated(detail?.updatedAt);
@@ -578,39 +498,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         let scoreChanged = false;
-        document.querySelectorAll('.tmr[data-match-key]').forEach(row => {
+        document.querySelectorAll('.smr[data-match-key]').forEach(row => {
             const live = byKey.get(row.dataset.matchKey);
             if (!live) return;
-            const prevScore = row.querySelector('.tmr-score')?.textContent || '';
-            const prevGame  = row.querySelector('.tmr-game')?.textContent || '';
+            const prevScore = row.querySelector('.smr-sets')?.textContent || '';
+            const prevGame  = row.querySelector('.smr-game')?.textContent || '';
             applyLiveToRow(row, live);
-            const nextScore = live.setScores?.length ? formatSetScores(live.setScores) : (live.finalResult || '');
-            const nextGame  = live.isLive && live.currentGame ? formatGameScore(live.currentGame) : '';
+            const nextScore = scoreText(live);
+            const nextGame  = gameText(live);
             if (prevScore !== nextScore || prevGame !== nextGame) scoreChanged = true;
-            const idx = todaysMatches.findIndex(m => matchKeyOf(m) === row.dataset.matchKey);
+            const idx = flatMatches.findIndex(m => matchKeyOf(m) === row.dataset.matchKey);
             if (idx >= 0) {
-                todaysMatches[idx] = { ...todaysMatches[idx], ...live };
+                flatMatches[idx] = Object.assign({}, flatMatches[idx], live);
             }
         });
 
-        if (scoreChanged) paintDigestCounts(todaysMatches);
-
-        const relevantLive = matches.filter(m =>
-            m.isLive && (!currentTournamentKey || String(m.tournamentKey) === String(currentTournamentKey))
-        );
-        const nextKeys = liveKeySet(relevantLive);
-        if (nextKeys !== lastLiveKeySet) {
-            lastLiveKeySet = nextKeys;
-            const track = document.getElementById('tickerTrack');
-            if (track && relevantLive.length) {
-                const tournShort = currentTournamentName.includes(' - ')
-                    ? currentTournamentName.split(' - ').pop()
-                    : currentTournamentName;
-                fillTickerTrack(track, relevantLive, tournShort);
-                duplicateTicker(track);
-                stampTickerTime();
-            }
-        }
+        if (scoreChanged) paintDigestCounts(flatMatches);
+        const subEl = document.getElementById('hubPageSub');
+        if (subEl) subEl.textContent = pageSub(anyLive(flatMatches));
     });
 
     window.addEventListener('tw:live-status', ({ detail: { status } }) => {
@@ -624,35 +529,24 @@ document.addEventListener('DOMContentLoaded', () => {
         setScoresNavLive(status === 'connected');
     });
 
-    async function mountFeaturedProbBar(featuredMatch) {
-        if (typeof TW === 'undefined' || !TW.ProbBar) return;
-        const host = document.getElementById('hubFeaturedMatch');
-        if (!host) return;
-
-        const stale = document.getElementById('hubProbBar');
-        if (stale) stale.remove();
-
-        const container = document.createElement('div');
-        container.id = 'hubProbBar';
-        host.appendChild(container);
-
-        await TW.ProbBar.mount(container, { ...featuredMatch, tour: currentTour });
-        if (!container.childNodes.length) container.remove();
-    }
-
-    function showFeaturedError(host) {
-        host.replaceChildren();
-        host.insertAdjacentHTML('afterbegin', errorCardHTML('Could not load match data.'));
+    function showListError(list) {
+        list.replaceChildren();
+        const card = el('div', 'error-card');
+        card.setAttribute('role', 'alert');
+        card.appendChild(el('span', 'error-card-icon', '⚠'));
+        card.appendChild(el('span', 'error-card-msg', 'Could not load match data.'));
         const btn = el('button', 'error-retry-btn', 'Try again');
         btn.type = 'button';
         btn.addEventListener('click', () => loadHub());
-        host.querySelector('.error-card')?.appendChild(btn);
+        card.appendChild(btn);
+        list.appendChild(card);
+        listMounted = false;
     }
 
     function startLiveOverlayIfNeeded(payload) {
         if (typeof LiveEngine === 'undefined') return;
         LiveEngine.setTour(currentTour);
-        const live = !!(payload?.featuredMatch?.isLive || anyLive(payload?.todaysMatches) || anyLive(payload?.recentResults));
+        const live = !!(anyLive(payload && payload.todaysMatches) || anyLive(payload && payload.recentResults) || (payload && payload.featuredMatch && payload.featuredMatch.isLive));
         if (live) LiveEngine.start();
     }
 
@@ -673,52 +567,38 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadHub() {
-        const featuredEl = document.getElementById('hubFeaturedMatch');
-        if (featuredEl) featuredEl.innerHTML = skeletonHTML(3);
+        const list = document.getElementById('scoresList');
+        const section = document.getElementById('scoresSection');
+        if (section) section.hidden = false;
+        if (list && !listMounted) {
+            const loading = el('div', 'digest-loading', 'Loading match data…');
+            list.replaceChildren(loading);
+        }
 
         try {
             const tour = parseTour(currentTour) || 'ATP';
             const data = await apiFetch(`/api/hub?tour=${encodeURIComponent(tour)}`, { auth: false });
             stampDigestUpdated();
 
-            renderTicker(data);
-
-            const nameEl = document.getElementById('hubTournamentName');
-            const eyeEl  = document.getElementById('hubEyebrow');
             if (!data || !data.tournament) {
-                if (nameEl) nameEl.textContent = 'No active tournament';
-                if (eyeEl) eyeEl.textContent = 'Scores';
-                if (featuredEl) featuredEl.replaceChildren();
-                renderH2H(document.getElementById('hubH2HStats'), null, null);
-                renderLatestResult(document.getElementById('hubLatestResult'), []);
-                renderTodaysMatches([], '');
+                currentTournamentKey = null;
+                currentTournamentName = '';
+                paintHeader(null, []);
+                renderFlatList([]);
                 return;
             }
 
-            const { tournament, featuredMatch, recentResults, todaysMatches: today, h2h } = data;
+            currentTournamentKey  = data.tournament.key || null;
+            currentTournamentName = data.tournament.name || '';
 
-            if (nameEl) nameEl.textContent = tournament.name || '';
-            if (eyeEl) eyeEl.textContent = featuredEyebrow(featuredMatch);
-            paintSurface(tournament);
-            const roundEl = document.getElementById('hubRoundLabel');
-            if (roundEl) roundEl.textContent = featuredMatch ? cleanRound(featuredMatch.round) : '—';
-            const subEl = document.getElementById('hubRoundSub');
-            if (subEl) subEl.textContent = featuredSub(featuredMatch);
-
-            renderH2H(document.getElementById('hubH2HStats'), h2h, featuredMatch);
-            renderLatestResult(document.getElementById('hubLatestResult'), recentResults);
-            renderTodaysMatches(today || [], tournament.name);
-
-            if (featuredEl) {
-                featuredEl.innerHTML = TW.MatchCard(featuredMatch, tournament.name);
-            }
-
-            mountFeaturedProbBar(featuredMatch);
+            const merged = sortFlatMatches(mergeHubMatches(data));
+            paintHeader(data.tournament, merged);
+            renderFlatList(merged);
             startLiveOverlayIfNeeded(data);
 
         } catch (err) {
             console.warn('Hub load failed:', err.message);
-            if (featuredEl) showFeaturedError(featuredEl);
+            if (list) showListError(list);
         }
     }
 
@@ -739,28 +619,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!btn) return;
             const next = btn.dataset.filter;
             if (!next || next === digestFilter) return;
-            digestFilter = next;
-            chips.querySelectorAll('.digest-chip').forEach(c => {
-                const on = c === btn;
-                c.classList.toggle('is-active', on);
-                c.setAttribute('aria-pressed', String(on));
-            });
-            renderTodaysMatches(todaysMatches, currentTournamentName);
+            setFilter(next);
         });
     }
 
-    function syncContextAccordion() {
-        const acc = document.getElementById('digestAccordion');
-        if (!acc) return;
-        const wide = window.matchMedia('(min-width: 1024px)');
-        const apply = () => { if (wide.matches) acc.open = true; };
-        apply();
-        if (typeof wide.addEventListener === 'function') wide.addEventListener('change', apply);
-        else if (typeof wide.addListener === 'function') wide.addListener(apply);
-    }
-
     paintTourToggle();
-    syncContextAccordion();
     if (typeof LiveEngine !== 'undefined') LiveEngine.setTour(currentTour);
 
     document.addEventListener('visibilitychange', () => {
