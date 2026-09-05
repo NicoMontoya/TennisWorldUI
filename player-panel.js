@@ -126,7 +126,16 @@
                 <div class="pp-form-dots" id="ppForm">
                     <span class="skeleton-line" style="width:8rem;height:.625rem;border-radius:4px;display:inline-block;"></span>
                 </div>
-            </section>`;
+            </section>
+            <hr class="pp-rule">
+            <details class="pp-rivalries" id="ppRivalries">
+                <summary class="pp-rivalries-summary">Rivalries</summary>
+                <div class="pp-rivalries-body">
+                    <div class="pp-rival-chips" id="ppRivalChips"></div>
+                    <div class="pp-rivalry-arc" id="ppRivalryArc" hidden></div>
+                    <p class="pp-rivalry-empty" id="ppRivalryEmpty"></p>
+                </div>
+            </details>`;
     }
 
     function updateIdentity(playerData, seed) {
@@ -193,6 +202,104 @@
         ).join('');
     }
 
+    // ── Rivalries (collapsible; H2H + RivalryArc) ─────────────────────────────
+
+    function wireRivalries(seed) {
+        const details = document.getElementById('ppRivalries');
+        if (!details) return;
+        let loaded = false;
+        details.addEventListener('toggle', () => {
+            if (!details.open || loaded) return;
+            loaded = true;
+            loadRivalries(seed);
+        });
+    }
+
+    async function loadRivalries(seed) {
+        const chipsEl = document.getElementById('ppRivalChips');
+        const emptyEl = document.getElementById('ppRivalryEmpty');
+        const arcEl   = document.getElementById('ppRivalryArc');
+        if (!chipsEl) return;
+        chipsEl.replaceChildren();
+        if (emptyEl) emptyEl.textContent = 'Loading rivals…';
+        if (arcEl) { arcEl.hidden = true; arcEl.replaceChildren(); }
+
+        let list = [];
+        try {
+            const fetchFn = typeof apiFetch === 'function'
+                ? apiFetch
+                : (path) => panelFetch(path);
+            const standings = await fetchFn(`/api/standings?tour=${encodeURIComponent(seed.tour || 'ATP')}`);
+            const rows = Array.isArray(standings)
+                ? standings
+                : (standings && (standings.standings || standings.players)) || [];
+            list = rows
+                .filter(p => p && p.playerKey && String(p.playerKey) !== String(seed.playerKey))
+                .slice(0, 6);
+        } catch {
+            list = [];
+        }
+
+        if (!list.length) {
+            if (emptyEl) emptyEl.textContent = 'No rivals available.';
+            return;
+        }
+        if (emptyEl) emptyEl.textContent = 'Pick a rival to see the recent H2H arc.';
+
+        list.forEach(p => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'pp-rival-chip';
+            btn.dataset.playerKey = String(p.playerKey);
+            btn.dataset.name = p.name || '';
+            btn.dataset.tour = p.tour || seed.tour || 'ATP';
+            const name = document.createElement('span');
+            name.textContent = p.name || p.playerKey;
+            btn.appendChild(name);
+            chipsEl.appendChild(btn);
+        });
+
+        chipsEl.addEventListener('click', e => {
+            const btn = e.target.closest('.pp-rival-chip');
+            if (!btn) return;
+            chipsEl.querySelectorAll('.pp-rival-chip').forEach(c => c.classList.toggle('is-active', c === btn));
+            loadRivalArc(seed, btn.dataset.playerKey, btn.dataset.name, btn.dataset.tour);
+        });
+
+        const first = chipsEl.querySelector('.pp-rival-chip');
+        if (first) {
+            first.classList.add('is-active');
+            loadRivalArc(seed, first.dataset.playerKey, first.dataset.name, first.dataset.tour);
+        }
+    }
+
+    async function loadRivalArc(seed, rivalKey, rivalName, tour) {
+        const emptyEl = document.getElementById('ppRivalryEmpty');
+        const arcEl   = document.getElementById('ppRivalryArc');
+        if (!arcEl || !rivalKey) return;
+        arcEl.hidden = true;
+        arcEl.replaceChildren();
+        if (emptyEl) emptyEl.textContent = '';
+        if (typeof TW === 'undefined' || !TW.RivalryArc) return;
+        try {
+            const fetchFn = typeof apiFetch === 'function' ? apiFetch : (path) => panelFetch(path);
+            const t = tour || seed.tour || 'ATP';
+            const data = await fetchFn(
+                `/api/h2h?playerKeyA=${encodeURIComponent(seed.playerKey)}&playerKeyB=${encodeURIComponent(rivalKey)}&tour=${encodeURIComponent(t)}`
+            );
+            const ok = TW.RivalryArc.mount(arcEl, {
+                meetings: (data && data.h2hMatches) || [],
+                player1Key: seed.playerKey,
+                player2Key: rivalKey,
+                player1Name: seed.name,
+                player2Name: rivalName,
+            });
+            if (!ok && emptyEl) emptyEl.textContent = 'No finished meetings yet.';
+        } catch {
+            if (emptyEl) emptyEl.textContent = 'Could not load this rivalry.';
+        }
+    }
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     async function openPlayer({ playerKey, tour = 'ATP', name = '', country = '', rank = null, birthday = null }) {
@@ -235,6 +342,8 @@
             starWrap.appendChild(btn);
             TW.auth.bindStarButtons(starWrap);
         }
+
+        wireRivalries(seed);
 
         const [profileResult, statsResult] = await Promise.allSettled([
             panelFetch(`/api/players?playerKey=${playerKey}`),

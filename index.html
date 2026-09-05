@@ -34,7 +34,7 @@
     }
     </script>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=tw36">
+    <link rel="stylesheet" href="styles.css?v=tw37">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e14">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -102,12 +102,18 @@
             </header>
 
             <div class="vintage-controls">
+                <div class="vintage-toggles">
+                <div class="view-toggle" id="viewToggle" role="tablist" aria-label="Chart view">
+                    <button type="button" class="view-btn active" data-view="curves" role="tab" aria-selected="true" aria-controls="vintageChartWrap" tabindex="0">Curves</button>
+                    <button type="button" class="view-btn" data-view="overlap" role="tab" aria-selected="false" aria-controls="overlapWrap" tabindex="-1">Overlap</button>
+                </div>
                 <div class="metric-toggle" id="metricToggle" role="group" aria-label="Chart metric">
                     <button type="button" class="metric-btn active" data-metric="w" aria-pressed="true">Matches Won</button>
                     <button type="button" class="metric-btn" data-metric="m" aria-pressed="false">Matches Played</button>
                     <button type="button" class="metric-btn" data-metric="t" aria-pressed="false">Tournaments Won</button>
                     <button type="button" class="metric-btn" data-metric="ms" aria-pressed="false">Masters 1000</button>
                     <button type="button" class="metric-btn" data-metric="gs" aria-pressed="false">Grand Slams</button>
+                </div>
                 </div>
                 <div class="vintage-add">
                     <input type="text" id="playerAddInput" list="rosterList" placeholder="Add a player…" autocomplete="off" aria-label="Add a player to the chart">
@@ -121,6 +127,15 @@
             <div class="chart-wrap vintage-chart-wrap" id="vintageChartWrap">
                 <div class="chart-loading" id="vintageLoading">Loading career data…</div>
                 <canvas id="vintageChart" role="img" aria-label="Vintage curves: cumulative matches won by player age"></canvas>
+            </div>
+            <div class="overlap-wrap" id="overlapWrap" hidden>
+                <p class="overlap-empty" id="overlapEmpty" hidden></p>
+                <div class="overlap-chart" id="overlapChart" hidden></div>
+                <p class="overlap-caption" id="overlapCaption" role="status" aria-live="polite"></p>
+                <div class="era-twins" id="eraTwins">
+                    <p class="era-twins-label" id="eraTwinsLabel"></p>
+                    <div class="era-twin-chips" id="eraTwinChips"></div>
+                </div>
             </div>
             <p class="vintage-note" id="vintageNote" role="status" aria-live="polite"></p>
         </div>
@@ -174,8 +189,10 @@
 
     <script src="shared.js"></script>
     <script src="auth.js"></script>
+    <script src="components/RivalryArc.js"></script>
     <script src="player-panel.js"></script>
     <script src="components/store.js"></script>
+    <script src="peakOverlap.js"></script>
     <script src="home.js"></script>
 </body>
 </html>

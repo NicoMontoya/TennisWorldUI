@@ -225,6 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
         container.replaceChildren();
         if (!h2h || !match) {
             container.appendChild(tstatItem('—', 'H2H'));
+            mountScoresRivalryArc(null, null);
             return;
         }
         const p1Last = (match.player1Name || '').split(' ').pop();
@@ -235,6 +236,47 @@ document.addEventListener('DOMContentLoaded', () => {
         mid.querySelector('.tstat-val').style.opacity = '0.45';
         container.appendChild(mid);
         container.appendChild(tstatItem(String(h2h.p2Wins ?? '—'), p2Last || 'P2'));
+        mountScoresRivalryArc(h2h, match);
+    }
+
+    function mountScoresRivalryArc(h2h, match) {
+        const slot = document.getElementById('hubRivalryArc');
+        if (!slot) return;
+        const k1 = match && match.player1Key;
+        const k2 = match && match.player2Key;
+        if (!h2h || !k1 || !k2 || typeof TW === 'undefined' || !TW.RivalryArc) {
+            slot.hidden = true;
+            slot.replaceChildren();
+            return;
+        }
+        const localMeetings = h2h.h2hMatches || h2h.meetings;
+        if (Array.isArray(localMeetings) && localMeetings.length) {
+            const ok = TW.RivalryArc.mount(slot, {
+                meetings: localMeetings,
+                player1Key: k1,
+                player2Key: k2,
+                player1Name: match.player1Name,
+                player2Name: match.player2Name,
+            });
+            if (!ok) { slot.hidden = true; slot.replaceChildren(); }
+            return;
+        }
+        const tour = parseTour(currentTour) || 'ATP';
+        apiFetch(`/api/h2h?playerKeyA=${encodeURIComponent(k1)}&playerKeyB=${encodeURIComponent(k2)}&tour=${encodeURIComponent(tour)}`)
+            .then(data => {
+                const ok = TW.RivalryArc.mount(slot, {
+                    meetings: (data && data.h2hMatches) || [],
+                    player1Key: k1,
+                    player2Key: k2,
+                    player1Name: match.player1Name,
+                    player2Name: match.player2Name,
+                });
+                if (!ok) { slot.hidden = true; slot.replaceChildren(); }
+            })
+            .catch(() => {
+                slot.hidden = true;
+                slot.replaceChildren();
+            });
     }
 
     function renderLatestResult(container, matches) {

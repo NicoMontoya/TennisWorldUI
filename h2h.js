@@ -266,22 +266,28 @@
             : `<div class="h2h-empty">No ${surface === 'all' ? '' : surface + ' '}matches found.</div>`;
 
         return `
-            <div class="h2h-modal-header">
-                <span class="h2h-name-a">${flag(playerA.country)} ${playerA.name}</span>
-                <span class="h2h-modal-vs">vs</span>
-                <span class="h2h-name-b">${playerB.name} ${flag(playerB.country)}</span>
+            <div class="h2h-modal-fixed">
+                <div class="h2h-modal-header">
+                    <span class="h2h-name-a">${flag(playerA.country)} ${playerA.name}</span>
+                    <span class="h2h-modal-vs">vs</span>
+                    <span class="h2h-name-b">${playerB.name} ${flag(playerB.country)}</span>
+                </div>
+
+                <div class="h2h-record" id="h2hRecord">
+                    ${recordBarHTML(sp)}
+                </div>
+
+                <div class="h2h-rivalry-slot" id="h2hRivalrySlot"></div>
             </div>
 
-            <div class="h2h-record" id="h2hRecord">
-                ${recordBarHTML(sp)}
-            </div>
+            <div class="h2h-modal-scroll">
+                <div class="h2h-surf-tabs" id="h2hSurfTabs">
+                    ${surfaceTabsHTML(splits, surface)}
+                </div>
 
-            <div class="h2h-surf-tabs" id="h2hSurfTabs">
-                ${surfaceTabsHTML(splits, surface)}
-            </div>
-
-            <div class="h2h-match-list" id="h2hMatchList">
-                ${matchListHTML}
+                <div class="h2h-match-list" id="h2hMatchList">
+                    ${matchListHTML}
+                </div>
             </div>`;
     }
 
@@ -371,11 +377,26 @@
                 currentData = await fetchH2H(playerA.playerKey, playerB.playerKey, tour);
                 content.innerHTML = renderContent(currentData, 'all');
                 bindTabs(content);
+                mountRivalryArc(content);
                 mountH2HPrediction(content, tour);
             } catch (err) {
                 content.innerHTML = errorCardHTML('Could not load head-to-head data. Try again later.');
             }
         });
+
+        // Fixed slot after header/record, before the scrolling match list.
+        function mountRivalryArc(contentEl) {
+            const slot = contentEl.querySelector('#h2hRivalrySlot');
+            if (!slot || typeof TW === 'undefined' || !TW.RivalryArc || !currentData || !playerA || !playerB) return;
+            const finished = (currentData.h2hMatches || []).filter(m => m.status === 'Finished');
+            TW.RivalryArc.mount(slot, {
+                meetings: finished,
+                player1Key: playerA.playerKey,
+                player2Key: playerB.playerKey,
+                player1Name: playerA.name,
+                player2Name: playerB.name,
+            });
+        }
 
         // ── "TennisWorld Prediction" section (additive, reuses TW.ProbBar) ────
         // Appended after the H2H content renders; renders nothing if the
@@ -388,7 +409,8 @@
                 section.innerHTML = '<h4 class="h2h-pred-title">TennisWorld Prediction</h4>';
                 const barHost = document.createElement('div');
                 section.appendChild(barHost);
-                contentEl.appendChild(section);
+                const scroll = contentEl.querySelector('.h2h-modal-scroll') || contentEl;
+                scroll.appendChild(section);
                 TW.ProbBar.mount(barHost, {
                     player1Key:  playerA.playerKey,
                     player1Name: playerA.name,
