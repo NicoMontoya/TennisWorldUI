@@ -31,6 +31,70 @@ function loadScoresHelpers() {
     return new Function(body + '; return { matchKeyOf, matchPhase, matchTimeMs, mergeHubMatches, sortFlatMatches };')();
 }
 
+describe('TW Security acceptance checklist', () => {
+    it('1. API strings use textContent/createElement/dataset — never innerHTML from payload', () => {
+        expect(scoresSrc).not.toMatch(/\.innerHTML\s*=/);
+        expect(scoresSrc).not.toMatch(/insertAdjacentHTML/);
+        expect(scoresSrc).toMatch(/textContent/);
+        expect(scoresSrc).toMatch(/dataset\.playerKey/);
+        expect(scoresSrc).toMatch(/dataset\.name/);
+        expect(scoresSrc).not.toMatch(/data-name="\$\{/);
+        expect(scoresHtml).not.toMatch(/RivalryArc/);
+        expect(scoresSrc).not.toMatch(/TW\.RivalryArc/);
+    });
+
+    it('2. live flash is classList + textContent on score cells only', () => {
+        const flash = extractFn(scoresSrc, 'flashText');
+        const apply = extractFn(scoresSrc, 'applyLiveToRow');
+        expect(flash).toMatch(/node\.textContent = text/);
+        expect(flash).toMatch(/node\.classList\.add\('score-flash'\)/);
+        expect(apply).toMatch(/flashText\(sets/);
+        expect(apply).toMatch(/flashText\(game/);
+        expect(apply).not.toMatch(/innerHTML/);
+        expect(apply).not.toMatch(/insertAdjacentHTML/);
+        expect(apply).not.toMatch(/replaceChildren/);
+        expect(apply).not.toMatch(/renderMatchRow/);
+        expect(apply).not.toMatch(/scoresList/);
+        expect(scoresSrc).toMatch(/querySelectorAll\('\.smr\[data-match-key\]'\)/);
+    });
+
+    it('3. Scores loads no new CDN/Chart.js and reuses auth.js', () => {
+        expect(scoresHtml).not.toMatch(/chart\.js/i);
+        expect(scoresHtml).not.toMatch(/cdn\.jsdelivr/);
+        expect(scoresHtml).toMatch(/<script src="auth\.js"><\/script>/);
+        expect(scoresHtml).toMatch(/<script src="shared\.js"><\/script>/);
+    });
+
+    it('4. PUBLIC_GET hub/livescore/calendar unchanged; SW is tw-v38', () => {
+        const sharedSrc = readFileSync(new URL('./shared.js', import.meta.url), 'utf8');
+        expect(sharedSrc).toMatch(/const PUBLIC_GET_PATHS = \['\/api\/hub', '\/api\/livescore', '\/api\/calendar'\]/);
+        expect(scoresSrc).toMatch(/apiFetch\(`\/api\/hub\?tour=\$\{encodeURIComponent\(tour\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
+        expect(liveSrc).toMatch(/apiFetch\(`\/api\/livescore\?tour=\$\{encodeURIComponent\(t\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v38'/);
+        expect(swSrc).not.toMatch(/tw-v37/);
+        expect(swSrc).not.toMatch(/peakOverlap/);
+    });
+
+    it('5. Peak Overlap is fully gone (files, toggle, chips, deep-link, CSS)', () => {
+        expect(indexHtml).not.toMatch(/data-view="overlap"/);
+        expect(indexHtml).not.toMatch(/overlapWrap|eraTwin|peakOverlap|overlap=/);
+        expect(homeSrc).not.toMatch(/overlap|eraTwin|PeakOverlap/i);
+        expect(stylesSrc).not.toMatch(/--overlap-/);
+        expect(stylesSrc).not.toMatch(/era-twin/);
+        expect(stylesSrc).not.toMatch(/\.overlap-/);
+        expect(swSrc).not.toMatch(/peakOverlap/);
+    });
+
+    it('6. Tour allowlist ATP|WTA is still enforced via parseTour', () => {
+        const sharedSrc = readFileSync(new URL('./shared.js', import.meta.url), 'utf8');
+        expect(sharedSrc).toMatch(/return t === 'ATP' \|\| t === 'WTA' \? t : null/);
+        expect(scoresSrc).toMatch(/parseTour\(btn\.dataset\.tour\)/);
+        expect(scoresSrc).toMatch(/writeStoredTour/);
+        expect(liveSrc).toMatch(/parseTour\(tour\)/);
+        expect(liveSrc).toMatch(/parseTour\(next\)/);
+    });
+});
+
 describe('scores digest security contracts', () => {
     it('flashes live score changes via classList + textContent only', () => {
         const flash = extractFn(scoresSrc, 'flashText');

@@ -7337,6 +7337,8 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-live) 35%, transparent);
 }
 
+.smr-badge:not(.smr-badge-live) .smr-dot { display: none; }
+
 .smr-players {
     display: flex;
     flex-wrap: wrap;

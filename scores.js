@@ -5,7 +5,9 @@
 // only while any match isLive. All API strings go through textContent
 // or dataset — never concatenated into innerHTML.
 // Live flash: classList + textContent on score cells only. Never rebuild
-// a row from a live payload.
+// a row from a live payload. TW Security checklist: textContent/dataset
+// only; no CDN on this page; PUBLIC_GET intact; parseTour allowlist;
+// Peak Overlap fully removed.
 
 function matchKeyOf(m) {
     if (!m) return '';
@@ -323,6 +325,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const status = el('div', 'smr-status');
         const badge = el('span', 'smr-badge');
+        const dot = el('span', 'smr-dot');
+        dot.setAttribute('aria-hidden', 'true');
+        const label = el('span', 'smr-badge-label');
+        badge.appendChild(dot);
+        badge.appendChild(label);
         status.appendChild(badge);
         row.appendChild(status);
 
@@ -353,20 +360,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function paintStatus(badge, m) {
         const phase = matchPhase(m);
         badge.className = 'smr-badge smr-badge-' + phase;
-        if (phase === 'live') {
-            badge.replaceChildren();
-            const dot = el('span', 'smr-dot');
-            dot.setAttribute('aria-hidden', 'true');
-            badge.appendChild(dot);
-            badge.appendChild(document.createTextNode('Live'));
-            badge.hidden = false;
-        } else if (phase === 'upcoming') {
-            badge.textContent = 'Upcoming';
-            badge.hidden = false;
-        } else {
-            badge.textContent = 'Finished';
-            badge.hidden = false;
+        const label = badge.querySelector('.smr-badge-label');
+        if (label) {
+            label.textContent = phase === 'live' ? 'Live' : phase === 'upcoming' ? 'Upcoming' : 'Finished';
         }
+        badge.hidden = false;
     }
 
     function paintRow(row, m, opts) {
@@ -381,7 +379,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const phase = matchPhase(m);
         const isLive = phase === 'live';
         const isDone = phase === 'finished';
-        row.className = 'smr smr-' + phase + (isLive ? ' smr-is-live' : '') + (isDone ? ' smr-is-done' : '');
+        row.classList.remove('smr-live', 'smr-upcoming', 'smr-finished', 'smr-is-live', 'smr-is-done');
+        row.classList.add('smr', 'smr-' + phase);
+        row.classList.toggle('smr-is-live', isLive);
+        row.classList.toggle('smr-is-done', isDone);
         row.dataset.phase = phase;
 
         paintStatus(badge, m);
@@ -420,9 +421,44 @@ document.addEventListener('DOMContentLoaded', () => {
         node.classList.add('score-flash');
     }
 
+    // TW Security #2: live patches existing score cells only. Never remount
+    // the row or interpolate the live payload into HTML.
     function applyLiveToRow(row, live, opts) {
         if (!row || !live) return;
-        paintRow(row, live, { flash: opts && opts.flash === false ? false : true });
+        const flash = !(opts && opts.flash === false);
+        const sets = row.querySelector('.smr-sets');
+        const game = row.querySelector('.smr-game');
+        const badge = row.querySelector('.smr-badge');
+        const label = row.querySelector('.smr-badge-label');
+        const phase = matchPhase(live);
+        const isLive = phase === 'live';
+        const isDone = phase === 'finished';
+
+        row.classList.remove('smr-live', 'smr-upcoming', 'smr-finished', 'smr-is-live', 'smr-is-done');
+        row.classList.add('smr', 'smr-' + phase);
+        row.classList.toggle('smr-is-live', isLive);
+        row.classList.toggle('smr-is-done', isDone);
+        row.dataset.phase = phase;
+
+        if (badge) {
+            badge.className = 'smr-badge smr-badge-' + phase;
+            badge.hidden = false;
+        }
+        if (label) {
+            label.textContent = isLive ? 'Live' : isDone ? 'Finished' : 'Upcoming';
+        }
+
+        const nextSets = scoreText(live);
+        const nextGame = gameText(live);
+        if (flash) {
+            flashText(sets, nextSets);
+            flashText(game, nextGame);
+        } else {
+            if (sets) sets.textContent = nextSets;
+            if (game) game.textContent = nextGame;
+        }
+        if (sets) sets.hidden = !nextSets;
+        if (game) game.hidden = !nextGame;
     }
 
     function stampDigestUpdated(iso) {
