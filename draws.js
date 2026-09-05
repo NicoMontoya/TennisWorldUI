@@ -154,9 +154,15 @@ document.addEventListener('DOMContentLoaded', () => {
     function selectMonth(month, year) {
         selectedMonth = month;
         const strip = document.getElementById('calMonthStrip');
+        let activeTab = null;
         strip?.querySelectorAll('.cal-month-tab').forEach(t => {
-            t.classList.toggle('active', Number(t.dataset.month) === month);
+            const on = Number(t.dataset.month) === month;
+            t.classList.toggle('active', on);
+            if (on) activeTab = t;
         });
+        if (activeTab && typeof activeTab.scrollIntoView === 'function') {
+            activeTab.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'auto' });
+        }
         document.querySelectorAll('.cal-month').forEach(el => {
             const m = Number(el.dataset.month);
             const on = m === month;
