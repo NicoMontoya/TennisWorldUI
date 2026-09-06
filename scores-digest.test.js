@@ -58,11 +58,17 @@ describe('TW Security acceptance checklist', () => {
         expect(scoresSrc).toMatch(/querySelectorAll\('\.smr\[data-match-key\]'\)/);
     });
 
-    it('3. Scores loads no new CDN/Chart.js and reuses auth.js', () => {
+    it('3. Scores loads no Chart.js/jsDelivr/GA; CF Insights beacon is the only third-party script exception', () => {
         expect(scoresHtml).not.toMatch(/chart\.js/i);
         expect(scoresHtml).not.toMatch(/cdn\.jsdelivr/);
+        expect(scoresHtml).not.toMatch(/google-analytics|googletagmanager|gtag\(/i);
         expect(scoresHtml).toMatch(/<script src="auth\.js"><\/script>/);
         expect(scoresHtml).toMatch(/<script src="shared\.js"><\/script>/);
+        const scriptSrcs = [...scoresHtml.matchAll(/<script[^>]+src=['"]([^'"]+)['"]/g)].map(m => m[1]);
+        const thirdParty = scriptSrcs.filter(s => /^https?:\/\//.test(s));
+        expect(thirdParty).toEqual(['https://static.cloudflareinsights.com/beacon.min.js']);
+        expect(scoresHtml.match(/static\.cloudflareinsights\.com\/beacon\.min\.js/g)).toHaveLength(1);
+        expect(scoresHtml).toContain('data-cf-beacon=\'{"token": "942ca2c26fd44a78b8f81b74b22f5f41"}\'');
     });
 
     it('4. PUBLIC_GET hub/livescore/calendar unchanged; SW is tw-v38', () => {
@@ -120,6 +126,28 @@ describe('scores digest security contracts', () => {
     it('does not load Chart.js on Scores', () => {
         expect(scoresHtml).not.toMatch(/chart\.js/i);
         expect(scoresHtml).not.toMatch(/cdn\.jsdelivr/);
+    });
+});
+
+const CF_BEACON = "<!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{\"token\": \"942ca2c26fd44a78b8f81b74b22f5f41\"}'></script><!-- End Cloudflare Web Analytics -->";
+const HTML_PAGES = [
+    'index.html',
+    'scores.html',
+    'draws.html',
+    'rankings.html',
+    'analytics.html',
+    'profile.html',
+    'player.html',
+];
+
+describe('Cloudflare Web Analytics beacon', () => {
+    it('is present exactly once on every HTML entry point', () => {
+        for (const name of HTML_PAGES) {
+            const html = readFileSync(new URL(`./${name}`, import.meta.url), 'utf8');
+            const hits = html.split(CF_BEACON).length - 1;
+            expect(hits, name).toBe(1);
+            expect(html).not.toMatch(/google-analytics|googletagmanager|gtag\(/i);
+        }
     });
 });
 
