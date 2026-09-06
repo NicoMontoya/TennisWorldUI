@@ -68,7 +68,8 @@ describe('TW Security acceptance checklist', () => {
         const thirdParty = scriptSrcs.filter(s => /^https?:\/\//.test(s));
         expect(thirdParty).toEqual(['https://static.cloudflareinsights.com/beacon.min.js']);
         expect(scoresHtml.match(/static\.cloudflareinsights\.com\/beacon\.min\.js/g)).toHaveLength(1);
-        expect(scoresHtml).toContain('data-cf-beacon=\'{"token": "942ca2c26fd44a78b8f81b74b22f5f41"}\'');
+        expect(scoresHtml).toMatch(/<script defer src='https:\/\/static\.cloudflareinsights\.com\/beacon\.min\.js' data-cf-beacon='\{"token": "[0-9a-f]{32}"\}'><\/script>/);
+        expect(scoresHtml).not.toMatch(/data-cf-beacon='\{[^']*(email|spa|userId|props)[^']*\}'/i);
     });
 
     it('4. PUBLIC_GET hub/livescore/calendar unchanged; SW is tw-v38', () => {
@@ -129,7 +130,7 @@ describe('scores digest security contracts', () => {
     });
 });
 
-const CF_BEACON = "<!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{\"token\": \"942ca2c26fd44a78b8f81b74b22f5f41\"}'></script><!-- End Cloudflare Web Analytics -->";
+const CF_BEACON_RE = /<!-- Cloudflare Web Analytics --><script defer src='https:\/\/static\.cloudflareinsights\.com\/beacon\.min\.js' data-cf-beacon='\{"token": "[0-9a-f]{32}"\}'><\/script><!-- End Cloudflare Web Analytics -->/;
 const HTML_PAGES = [
     'index.html',
     'scores.html',
@@ -141,12 +142,13 @@ const HTML_PAGES = [
 ];
 
 describe('Cloudflare Web Analytics beacon', () => {
-    it('is present exactly once on every HTML entry point', () => {
+    it('is the official deferred snippet exactly once on every HTML entry point', () => {
         for (const name of HTML_PAGES) {
             const html = readFileSync(new URL(`./${name}`, import.meta.url), 'utf8');
-            const hits = html.split(CF_BEACON).length - 1;
-            expect(hits, name).toBe(1);
+            const hits = html.match(new RegExp(CF_BEACON_RE.source, 'g')) || [];
+            expect(hits, name).toHaveLength(1);
             expect(html).not.toMatch(/google-analytics|googletagmanager|gtag\(/i);
+            expect(html).not.toMatch(/data-cf-beacon='\{[^']*(email|spa|userId|props)[^']*\}'/i);
         }
     });
 });
