@@ -10,16 +10,60 @@
 // Never rebuild a row from a live payload. TW Security checklist:
 // textContent/dataset only; no CDN on this page; PUBLIC_GET intact;
 // parseTour allowlist; Peak Overlap fully removed.
+// Finished paint: Finished / Ended / Retired / Walkover (any case).
+// mergeLiveOverlay also promotes those terminal livescore rows onto hub.
 
 function matchKeyOf(m) {
     if (!m) return '';
     return String(m.matchKey || m.key || `${m.player1Key || ''}-${m.player2Key || ''}-${m.round || ''}`);
 }
 
+// API status strings vary: Finished / Ended / Retired / Walkover (any case).
+function isFinishedStatus(status) {
+    const s = String(status == null ? '' : status).trim().toLowerCase();
+    return s === 'finished' || s === 'ended' || s === 'retired' || s === 'walkover';
+}
+
 function matchPhase(m) {
     if (m && m.isLive) return 'live';
-    if (m && m.status === 'Finished') return 'finished';
+    if (m && isFinishedStatus(m.status)) return 'finished';
     return 'upcoming';
+}
+
+function pairRoundKey(m) {
+    if (!m) return '';
+    const a = String(m.player1Key || m.player1Name || '').trim().toLowerCase();
+    const b = String(m.player2Key || m.player2Name || '').trim().toLowerCase();
+    const round = String(m.round || '').trim().toLowerCase();
+    if (!a || !b || !round) return '';
+    return [a, b].sort().join('\0') + '\0' + round;
+}
+
+// Drop a Not Started / upcoming duplicate when the same player-pair+round
+// already has a Finished (or other terminal) row. Different matchKeys can
+// otherwise show the same completed match as both Upcoming and Finished.
+function dedupePairRoundMatches(matches) {
+    const list = matches || [];
+    const groups = new Map();
+    list.forEach((m, i) => {
+        const k = pairRoundKey(m);
+        if (!k) return;
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(i);
+    });
+    const drop = new Set();
+    groups.forEach(idxs => {
+        if (idxs.length < 2) return;
+        const rows = idxs.map(i => list[i]);
+        const hasFinished = rows.some(m => m && !m.isLive && isFinishedStatus(m.status));
+        const hasUpcoming = rows.some(m => m && !m.isLive && !isFinishedStatus(m.status));
+        if (!hasFinished || !hasUpcoming) return;
+        idxs.forEach(i => {
+            const m = list[i];
+            if (m && !m.isLive && !isFinishedStatus(m.status)) drop.add(i);
+        });
+    });
+    return list.filter((_, i) => !drop.has(i));
 }
 
 function matchTimeMs(m) {
@@ -71,11 +115,23 @@ function mergeLiveOverlay(hubMatches, liveMatches) {
             if (live.currentGame != null) next.currentGame = live.currentGame;
             return next;
         }
-        if (hub.status === 'Finished') {
+        if (isFinishedStatus(hub.status)) {
             if ((!hub.setScores || !hub.setScores.length) && live.setScores && live.setScores.length) {
                 return Object.assign({}, hub, { setScores: live.setScores, isLive: false });
             }
             return Object.assign({}, hub, { isLive: false });
+        }
+        // Promote Finished / Ended / Retired / Walkover onto a Not Started
+        // hub row. Copy scores/winner only when livescore actually has them.
+        if (isFinishedStatus(live.status)) {
+            const next = Object.assign({}, hub, {
+                isLive: false,
+                status: live.status,
+            });
+            if (live.setScores && live.setScores.length) next.setScores = live.setScores;
+            if (live.currentGame != null) next.currentGame = live.currentGame;
+            if (live.winner != null && live.winner !== '') next.winner = live.winner;
+            return next;
         }
         if (live.setScores && live.setScores.length && (!hub.setScores || !hub.setScores.length)) {
             return Object.assign({}, hub, { setScores: live.setScores, isLive: false });
@@ -87,7 +143,12 @@ function mergeLiveOverlay(hubMatches, liveMatches) {
 function overlayMatchesForHub(engineLast, paintedMatches) {
     if (Array.isArray(engineLast) && engineLast.length) return engineLast;
     if (engineLast === null || engineLast === undefined) {
-        return (paintedMatches || []).filter(m => m && (m.isLive || (m.setScores && m.setScores.length) || m.currentGame));
+        return (paintedMatches || []).filter(m => m && (
+            m.isLive
+            || (m.setScores && m.setScores.length)
+            || m.currentGame
+            || isFinishedStatus(m.status)
+        ));
     }
     return [];
 }
@@ -360,7 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderMatchRow(m) {
-        const isDone = m.status === 'Finished';
+        const isDone = matchPhase(m) === 'finished';
         const isLive = !!m.isLive;
         const winner = matchWinner(m);
         const p1Won  = winner === 'p1';
@@ -646,7 +707,9 @@ document.addEventListener('DOMContentLoaded', () => {
             currentTournamentKey  = data.tournament.key || null;
             currentTournamentName = data.tournament.name || '';
 
-            const merged = sortFlatMatches(mergeLiveOverlay(mergeHubMatches(data), liveOverlaySource()));
+            const merged = sortFlatMatches(dedupePairRoundMatches(
+                mergeLiveOverlay(mergeHubMatches(data), liveOverlaySource())
+            ));
             paintHeader(data.tournament, merged);
             renderFlatList(merged);
             ensureLiveEngine();

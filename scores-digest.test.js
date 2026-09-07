@@ -27,11 +27,12 @@ function extractFn(src, name) {
 
 function loadScoresHelpers() {
     const names = [
-        'matchKeyOf', 'matchPhase', 'matchTimeMs', 'mergeHubMatches', 'sortFlatMatches',
+        'matchKeyOf', 'isFinishedStatus', 'matchPhase', 'pairRoundKey', 'dedupePairRoundMatches',
+        'matchTimeMs', 'mergeHubMatches', 'sortFlatMatches',
         'liveByKeyFrom', 'mergeLiveOverlay', 'overlayMatchesForHub',
     ];
     const body = names.map(n => extractFn(scoresSrc, n)).join('\n');
-    return new Function(body + '; return { matchKeyOf, matchPhase, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, mergeLiveOverlay, overlayMatchesForHub };')();
+    return new Function(body + '; return { matchKeyOf, isFinishedStatus, matchPhase, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, mergeLiveOverlay, overlayMatchesForHub };')();
 }
 
 describe('TW Security acceptance checklist', () => {
@@ -287,13 +288,100 @@ describe('hub reload preserves live overlay', () => {
         expect(overlayMatchesForHub([], painted)).toEqual([]);
         expect(overlayMatchesForHub([{ matchKey: 'live-1', isLive: true }], painted)[0].matchKey).toBe('live-1');
     });
+
+    it('keeps painted Finished rows in the pre-poll overlay fallback', () => {
+        const painted = [{ matchKey: 'done', status: 'Finished' }];
+        expect(overlayMatchesForHub(null, painted)).toEqual(painted);
+    });
+
+    it('promotes Finished livescore onto a Not Started hub row', () => {
+        const hub = [{
+            matchKey: 'andreeva',
+            player1Name: 'Andreeva',
+            player2Name: 'Opponent',
+            status: 'Not Started',
+        }];
+        const live = [{
+            matchKey: 'andreeva',
+            isLive: false,
+            status: 'Finished',
+            setScores: [{ p1: 6, p2: 2 }, { p1: 6, p2: 3 }],
+            currentGame: '',
+            winner: 'player1',
+        }];
+        const [row] = mergeLiveOverlay(hub, live);
+        expect(row.isLive).toBe(false);
+        expect(row.status).toBe('Finished');
+        expect(row.setScores).toEqual([{ p1: 6, p2: 2 }, { p1: 6, p2: 3 }]);
+        expect(row.winner).toBe('player1');
+        expect(row.currentGame).toBe('');
+        expect(row.player1Name).toBe('Andreeva');
+        expect(matchPhase(row)).toBe('finished');
+    });
+
+    it('promotes Retired / Walkover / Ended without inventing scores', () => {
+        const hub = [{ matchKey: 'wo', status: 'Not Started' }];
+        const live = [{ matchKey: 'wo', isLive: false, status: 'Walkover', winner: 'player2' }];
+        const [row] = mergeLiveOverlay(hub, live);
+        expect(row.status).toBe('Walkover');
+        expect(row.winner).toBe('player2');
+        expect(row.setScores).toBeUndefined();
+        expect(matchPhase(row)).toBe('finished');
+        expect(matchPhase({ status: 'retired' })).toBe('finished');
+        expect(matchPhase({ status: 'ENDED' })).toBe('finished');
+    });
+});
+
+describe('finished status + pair-round dedupe', () => {
+    const { isFinishedStatus, matchPhase, dedupePairRoundMatches, sortFlatMatches } = loadScoresHelpers();
+
+    it('treats Finished / Ended / Retired / Walkover as finished, case-insensitive', () => {
+        expect(isFinishedStatus('Finished')).toBe(true);
+        expect(isFinishedStatus('finished')).toBe(true);
+        expect(isFinishedStatus('ENDED')).toBe(true);
+        expect(isFinishedStatus(' Retired ')).toBe(true);
+        expect(isFinishedStatus('walkover')).toBe(true);
+        expect(isFinishedStatus('Not Started')).toBe(false);
+        expect(isFinishedStatus('InPlay')).toBe(false);
+        expect(matchPhase({ status: 'Walkover' })).toBe('finished');
+        expect(matchPhase({ status: 'Not Started' })).toBe('upcoming');
+        expect(matchPhase({ isLive: true, status: 'Finished' })).toBe('live');
+    });
+
+    it('drops a Not Started duplicate when Finished exists for the same pair+round', () => {
+        const list = [
+            { matchKey: 'ns-1', player1Key: 'A', player2Key: 'B', round: 'Final', status: 'Not Started' },
+            { matchKey: 'done-1', player1Key: 'B', player2Key: 'A', round: 'Final', status: 'Finished', setScores: [{ p1: 6, p2: 4 }] },
+            { matchKey: 'other', player1Key: 'C', player2Key: 'D', round: 'Final', status: 'Not Started' },
+            { matchKey: 'sf', player1Key: 'A', player2Key: 'B', round: 'Semifinals', status: 'Not Started' },
+        ];
+        const deduped = dedupePairRoundMatches(list);
+        expect(deduped.map(m => m.matchKey)).toEqual(['done-1', 'other', 'sf']);
+        const sorted = sortFlatMatches(deduped);
+        expect(sorted.map(m => m.matchKey)).toEqual(['other', 'sf', 'done-1']);
+        expect(matchPhase(sorted[2])).toBe('finished');
+    });
+});
+
+describe('MatchCard / DrawMatch finished-status equivalents', () => {
+    it('treat the same terminal statuses as finished', () => {
+        const matchCard = readFileSync(new URL('./components/MatchCard.js', import.meta.url), 'utf8');
+        const drawMatch = readFileSync(new URL('./components/DrawMatch.js', import.meta.url), 'utf8');
+        for (const src of [matchCard, drawMatch]) {
+            expect(src).toMatch(/s === 'finished'/);
+            expect(src).toMatch(/s === 'ended'/);
+            expect(src).toMatch(/s === 'retired'/);
+            expect(src).toMatch(/s === 'walkover'/);
+            expect(src).toMatch(/isFinishedStatus\(match\.status\)/);
+        }
+    });
 });
 
 describe('Scores always starts LiveEngine', () => {
     it('refreshes LiveEngine on hub load without gating on hub isLive', () => {
         expect(scoresSrc).toMatch(/function ensureLiveEngine\(/);
         expect(scoresSrc).toMatch(/LiveEngine\.refresh\(\)/);
-        expect(scoresSrc).toMatch(/mergeLiveOverlay\(mergeHubMatches\(data\), liveOverlaySource\(\)\)/);
+        expect(scoresSrc).toMatch(/dedupePairRoundMatches\(\s*mergeLiveOverlay\(mergeHubMatches\(data\), liveOverlaySource\(\)\)/);
         expect(scoresSrc).not.toMatch(/startLiveOverlayIfNeeded/);
         expect(scoresSrc).not.toMatch(/if \(live\) LiveEngine\.start/);
     });

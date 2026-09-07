@@ -50,10 +50,15 @@ TW.VisualBracket = (function () {
     }
 
     // ── Match status / winner ─────────────────────────────────────────────────
+    function isFinishedStatus(status) {
+        const s = String(status == null ? '' : status).trim().toLowerCase();
+        return s === 'finished' || s === 'ended' || s === 'retired' || s === 'walkover';
+    }
+
     function matchStatus(m) {
         if (m.isLive || m.status === '1') return 'live';
-        if (m.status === 'Finished')      return 'finished';
-        if (m.status === 'Cancelled')     return 'cancelled';
+        if (isFinishedStatus(m.status))   return 'finished';
+        if (String(m.status || '').trim().toLowerCase() === 'cancelled') return 'cancelled';
         return 'upcoming';
     }
 

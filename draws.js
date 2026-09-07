@@ -104,6 +104,11 @@ const ROUND_LABELS = {
 };
 const ROUND_SHORT = { 'Final':'F','Semifinals':'SF','Quarterfinals':'QF','R16':'R16','R32':'R32','R64':'R64','R128':'R128' };
 
+function isFinishedStatus(status) {
+    const s = String(status == null ? '' : status).trim().toLowerCase();
+    return s === 'finished' || s === 'ended' || s === 'retired' || s === 'walkover';
+}
+
 function cleanRound(round) {
     if (!round) return '';
     const parts = round.split(' - ');
@@ -466,8 +471,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!matches.length) continue;
 
             const live     = matches.filter(m => m.isLive);
-            const finished = matches.filter(m => !m.isLive && m.status === 'Finished');
-            const upcoming = matches.filter(m => !m.isLive && m.status !== 'Finished');
+            const finished = matches.filter(m => !m.isLive && isFinishedStatus(m.status));
+            const upcoming = matches.filter(m => !m.isLive && !isFinishedStatus(m.status));
 
             upcoming.sort((a, b) => {
                 const sa = Math.min(a.player1Seed || 999, a.player2Seed || 999);
@@ -569,7 +574,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderDrawRow(m) {
-        const isDone = m.status === 'Finished';
+        const isDone = isFinishedStatus(m.status);
         const isLive = m.isLive;
         const p1Won  = m.winner === 'player1';
         const p2Won  = m.winner === 'player2';
@@ -624,7 +629,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!subEl) return;
 
         // Most advanced round that has completed matches
-        const played     = allMatches.filter(m => m.status === 'Finished');
+        const played     = allMatches.filter(m => isFinishedStatus(m.status));
         const latestRound = played.length
             ? cleanRound(played.reduce((a, b) =>
                 (ROUND_SHORT[cleanRound(a.round)] || a.round) < (ROUND_SHORT[cleanRound(b.round)] || b.round)
