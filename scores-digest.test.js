@@ -27,12 +27,13 @@ function extractFn(src, name) {
 
 function loadScoresHelpers() {
     const names = [
-        'matchKeyOf', 'isFinishedStatus', 'matchPhase', 'pairRoundKey', 'dedupePairRoundMatches',
+        'matchKeyOf', 'isFinishedStatus', 'isDelayedStatus', 'matchPhase', 'phaseLabel',
+        'pairRoundKey', 'dedupePairRoundMatches',
         'matchTimeMs', 'mergeHubMatches', 'sortFlatMatches',
         'liveByKeyFrom', 'mergeLiveOverlay', 'overlayMatchesForHub',
     ];
     const body = names.map(n => extractFn(scoresSrc, n)).join('\n');
-    return new Function(body + '; return { matchKeyOf, isFinishedStatus, matchPhase, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, mergeLiveOverlay, overlayMatchesForHub };')();
+    return new Function(body + '; return { matchKeyOf, isFinishedStatus, isDelayedStatus, matchPhase, phaseLabel, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, mergeLiveOverlay, overlayMatchesForHub };')();
 }
 
 describe('TW Security acceptance checklist', () => {
@@ -211,18 +212,20 @@ describe('hub merge + All sort', () => {
         expect(byKey.c.status).toBe('Finished');
     });
 
-    it('sorts All as Live → Upcoming (time) → Finished (recent first)', () => {
+    it('sorts All as Live → Delayed → Upcoming (time) → Finished (recent first)', () => {
         const sorted = sortFlatMatches([
             { matchKey: 'f1', status: 'Finished', date: '2026-09-05T10:00:00Z' },
             { matchKey: 'u2', status: 'Not Started', date: '2026-09-05T16:00:00Z' },
             { matchKey: 'f2', status: 'Finished', date: '2026-09-05T14:00:00Z' },
             { matchKey: 'live', isLive: true },
             { matchKey: 'u1', status: 'Not Started', date: '2026-09-05T12:00:00Z' },
+            { matchKey: 'd1', status: 'Delayed', date: '2026-09-05T11:00:00Z' },
         ]);
-        expect(sorted.map(m => m.matchKey)).toEqual(['live', 'u1', 'u2', 'f2', 'f1']);
+        expect(sorted.map(m => m.matchKey)).toEqual(['live', 'd1', 'u1', 'u2', 'f2', 'f1']);
         expect(matchPhase(sorted[0])).toBe('live');
-        expect(matchPhase(sorted[1])).toBe('upcoming');
-        expect(matchPhase(sorted[4])).toBe('finished');
+        expect(matchPhase(sorted[1])).toBe('delayed');
+        expect(matchPhase(sorted[2])).toBe('upcoming');
+        expect(matchPhase(sorted[5])).toBe('finished');
     });
 });
 
@@ -343,6 +346,7 @@ describe('finished status + pair-round dedupe', () => {
         expect(isFinishedStatus('walkover')).toBe(true);
         expect(isFinishedStatus('Not Started')).toBe(false);
         expect(isFinishedStatus('InPlay')).toBe(false);
+        expect(isFinishedStatus('Delayed')).toBe(false);
         expect(matchPhase({ status: 'Walkover' })).toBe('finished');
         expect(matchPhase({ status: 'Not Started' })).toBe('upcoming');
         expect(matchPhase({ isLive: true, status: 'Finished' })).toBe('live');
@@ -374,6 +378,117 @@ describe('MatchCard / DrawMatch finished-status equivalents', () => {
             expect(src).toMatch(/s === 'walkover'/);
             expect(src).toMatch(/isFinishedStatus\(match\.status\)/);
         }
+    });
+});
+
+describe('Delayed status is not Upcoming', () => {
+    const { isDelayedStatus, matchPhase, phaseLabel, mergeLiveOverlay, overlayMatchesForHub } = loadScoresHelpers();
+
+    it('maps Delayed / Postponed / Suspended to delayed phase, case-insensitive', () => {
+        expect(isDelayedStatus('Delayed')).toBe(true);
+        expect(isDelayedStatus('delayed')).toBe(true);
+        expect(isDelayedStatus(' POSTPONED ')).toBe(true);
+        expect(isDelayedStatus('suspended')).toBe(true);
+        expect(isDelayedStatus('Not Started')).toBe(false);
+        expect(isDelayedStatus('Finished')).toBe(false);
+        expect(isDelayedStatus('InPlay')).toBe(false);
+        expect(matchPhase({ status: 'Delayed' })).toBe('delayed');
+        expect(matchPhase({ status: 'postponed' })).toBe('delayed');
+        expect(matchPhase({ status: 'SUSPENDED' })).toBe('delayed');
+        expect(matchPhase({ status: 'Not Started' })).toBe('upcoming');
+        expect(matchPhase({ isLive: true, status: 'Delayed' })).toBe('live');
+        expect(matchPhase({ status: 'Finished' })).toBe('finished');
+    });
+
+    it('paints Delayed badge — never Upcoming — for Delayed API rows', () => {
+        expect(phaseLabel({ status: 'Delayed' })).toBe('Delayed');
+        expect(phaseLabel({ status: 'delayed' })).toBe('Delayed');
+        expect(phaseLabel({ matchKey: '1023', status: 'Delayed' })).not.toBe('Upcoming');
+        expect(phaseLabel({ matchKey: '933', status: 'Delayed' })).not.toBe('Upcoming');
+        expect(phaseLabel({ status: 'Postponed' })).toBe('Delayed');
+        expect(phaseLabel({ status: 'Suspended' })).toBe('Delayed');
+        expect(phaseLabel({ status: 'Not Started' })).toBe('Upcoming');
+        expect(phaseLabel({ isLive: true })).toBe('Live');
+        expect(phaseLabel({ status: 'Finished' })).toBe('Finished');
+        expect(phaseLabel({ status: 'Walkover' })).toBe('Finished');
+        expect(scoresSrc).toMatch(/label\.textContent = phaseLabel\(/);
+        expect(extractFn(scoresSrc, 'paintStatus')).not.toMatch(/Upcoming' : 'Finished'/);
+        expect(extractFn(scoresSrc, 'applyLiveToRow')).not.toMatch(/isDone \? 'Finished' : 'Upcoming'/);
+    });
+
+    it('excludes Delayed from the Upcoming filter bucket', () => {
+        const rows = [
+            { matchKey: '1023', status: 'Delayed' },
+            { matchKey: '933', status: 'Delayed' },
+            { matchKey: 'ns', status: 'Not Started' },
+            { matchKey: 'live', isLive: true },
+            { matchKey: 'done', status: 'Finished' },
+        ];
+        const upcoming = rows.filter(m => matchPhase(m) === 'upcoming');
+        expect(upcoming.map(m => m.matchKey)).toEqual(['ns']);
+        expect(rows.filter(m => matchPhase(m) === 'delayed').map(m => m.matchKey)).toEqual(['1023', '933']);
+    });
+
+    it('promotes Delayed livescore onto a Not Started hub row without inventing scores', () => {
+        const hub = [{
+            matchKey: '1023',
+            player1Name: 'Andreeva',
+            player2Name: 'Potapova',
+            status: 'Not Started',
+        }];
+        const live = [{ matchKey: '1023', isLive: false, status: 'Delayed' }];
+        const [row] = mergeLiveOverlay(hub, live);
+        expect(row.isLive).toBe(false);
+        expect(row.status).toBe('Delayed');
+        expect(row.setScores).toBeUndefined();
+        expect(row.player1Name).toBe('Andreeva');
+        expect(matchPhase(row)).toBe('delayed');
+        expect(phaseLabel(row)).toBe('Delayed');
+        expect(phaseLabel(row)).not.toBe('Upcoming');
+    });
+
+    it('does not clobber Live overlay or Finished promotion', () => {
+        const hub = [
+            { matchKey: 'live-1', player1Name: 'A', status: 'Not Started' },
+            { matchKey: 'done-1', player1Name: 'B', status: 'Not Started' },
+            { matchKey: 'delay-1', player1Name: 'C', status: 'Delayed' },
+        ];
+        const live = [
+            { matchKey: 'live-1', isLive: true, status: 'InPlay', setScores: [{ p1: 3, p2: 2 }], currentGame: '15 - 0' },
+            { matchKey: 'done-1', isLive: false, status: 'Finished', setScores: [{ p1: 6, p2: 3 }], winner: 'player1' },
+        ];
+        const merged = mergeLiveOverlay(hub, live);
+        const byKey = Object.fromEntries(merged.map(m => [m.matchKey, m]));
+        expect(byKey['live-1'].isLive).toBe(true);
+        expect(matchPhase(byKey['live-1'])).toBe('live');
+        expect(byKey['done-1'].status).toBe('Finished');
+        expect(matchPhase(byKey['done-1'])).toBe('finished');
+        expect(byKey['delay-1'].status).toBe('Delayed');
+        expect(matchPhase(byKey['delay-1'])).toBe('delayed');
+    });
+
+    it('keeps painted Delayed rows in the pre-poll overlay fallback', () => {
+        const painted = [{ matchKey: '1023', status: 'Delayed' }];
+        expect(overlayMatchesForHub(null, painted)).toEqual(painted);
+    });
+});
+
+describe('MatchCard / DrawMatch / VisualBracket delayed-status equivalents', () => {
+    it('treat Delayed / Postponed / Suspended as delayed, not upcoming', () => {
+        const matchCard = readFileSync(new URL('./components/MatchCard.js', import.meta.url), 'utf8');
+        const drawMatch = readFileSync(new URL('./components/DrawMatch.js', import.meta.url), 'utf8');
+        const visual = readFileSync(new URL('./components/VisualBracket.js', import.meta.url), 'utf8');
+        const draws = readFileSync(new URL('./draws.js', import.meta.url), 'utf8');
+        for (const src of [matchCard, drawMatch, visual, draws]) {
+            expect(src).toMatch(/s === 'delayed'/);
+            expect(src).toMatch(/s === 'postponed'/);
+            expect(src).toMatch(/s === 'suspended'/);
+            expect(src).toMatch(/isDelayedStatus\(/);
+        }
+        expect(matchCard).toMatch(/>Delayed</);
+        expect(drawMatch).toMatch(/score = 'Delayed'/);
+        expect(draws).toMatch(/draw-badge-delayed/);
+        expect(draws).toMatch(/\$\{delayed\.length\} delayed/);
     });
 });
 

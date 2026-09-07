@@ -109,6 +109,11 @@ function isFinishedStatus(status) {
     return s === 'finished' || s === 'ended' || s === 'retired' || s === 'walkover';
 }
 
+function isDelayedStatus(status) {
+    const s = String(status == null ? '' : status).trim().toLowerCase();
+    return s === 'delayed' || s === 'postponed' || s === 'suspended';
+}
+
 function cleanRound(round) {
     if (!round) return '';
     const parts = round.split(' - ');
@@ -472,7 +477,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const live     = matches.filter(m => m.isLive);
             const finished = matches.filter(m => !m.isLive && isFinishedStatus(m.status));
-            const upcoming = matches.filter(m => !m.isLive && !isFinishedStatus(m.status));
+            const delayed  = matches.filter(m => !m.isLive && !isFinishedStatus(m.status) && isDelayedStatus(m.status));
+            const upcoming = matches.filter(m => !m.isLive && !isFinishedStatus(m.status) && !isDelayedStatus(m.status));
 
             upcoming.sort((a, b) => {
                 const sa = Math.min(a.player1Seed || 999, a.player2Seed || 999);
@@ -480,11 +486,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 return sa - sb;
             });
 
-            const all = [...live, ...finished, ...upcoming];
+            const all = [...live, ...delayed, ...finished, ...upcoming];
             orderedMatches.push(...all);
             const summary = `<div class="draw-round-summary">
                 ${finished.length} completed
                 ${live.length ? `· <span class="draw-live-inline">${live.length} live</span>` : ''}
+                ${delayed.length ? `· ${delayed.length} delayed` : ''}
                 · ${upcoming.length} upcoming
                 · ${all.length} total
             </div>`;
@@ -576,6 +583,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderDrawRow(m) {
         const isDone = isFinishedStatus(m.status);
         const isLive = m.isLive;
+        const isDelayed = !isLive && !isDone && isDelayedStatus(m.status);
         const p1Won  = m.winner === 'player1';
         const p2Won  = m.winner === 'player2';
 
@@ -589,6 +597,8 @@ document.addEventListener('DOMContentLoaded', () => {
             center = `<span class="draw-score-str">${m.setScores.join(' ')}</span>`;
         } else if (isDone) {
             center = `<span class="draw-score-str">—</span>`;
+        } else if (isDelayed) {
+            center = `<span class="draw-badge draw-badge-delayed">Delayed</span>`;
         } else {
             center = `<span class="draw-vs">vs</span>`;
         }
@@ -608,7 +618,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const p1Lost = isDone && !p1Won;
         const p2Lost = isDone && !p2Won;
 
-        return `<div class="draw-row-flat${isLive ? ' draw-row-live' : isDone ? ' draw-row-done' : ' draw-row-upcoming'}">
+        return `<div class="draw-row-flat${isLive ? ' draw-row-live' : isDone ? ' draw-row-done' : isDelayed ? ' draw-row-delayed' : ' draw-row-upcoming'}">
             <div class="draw-cell-p1">
                 ${seedBadge(m.player1Seed)}
                 ${playerSpan(m.player1Name, m.player1Key, p1Won, p1Lost)}

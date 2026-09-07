@@ -20,9 +20,15 @@ TW.MatchCard = function MatchCard(m, tournamentName) {
         return s === 'finished' || s === 'ended' || s === 'retired' || s === 'walkover';
     }
 
+    function isDelayedStatus(status) {
+        const s = String(status == null ? '' : status).trim().toLowerCase();
+        return s === 'delayed' || s === 'postponed' || s === 'suspended';
+    }
+
     function statusType(match) {
         if (match.isLive || match.status === '1') return 'live';
         if (isFinishedStatus(match.status))       return 'finished';
+        if (isDelayedStatus(match.status))        return 'delayed';
         if (String(match.status || '').trim().toLowerCase() === 'cancelled') return 'cancelled';
         return 'upcoming';
     }
@@ -94,6 +100,8 @@ TW.MatchCard = function MatchCard(m, tournamentName) {
         ? '<div class="hub-live-pill">● Live</div>'
         : status === 'finished'
         ? '<div class="hub-live-pill" style="color:var(--text-secondary)">Finished</div>'
+        : status === 'delayed'
+        ? '<div class="hub-live-pill" style="color:var(--text-secondary)">Delayed</div>'
         : '<div class="hub-live-pill" style="color:var(--text-muted)">Upcoming · ' + esc(formatMatchDate(m)) + '</div>';
 
     // Live point score
@@ -102,7 +110,7 @@ TW.MatchCard = function MatchCard(m, tournamentName) {
         : '';
 
     // Set column headers (only show if there are scores)
-    const setCount  = (m.setScores && m.setScores.length) || (status === 'upcoming' ? 0 : 1);
+    const setCount  = (m.setScores && m.setScores.length) || (status === 'upcoming' || status === 'delayed' ? 0 : 1);
     const setLabels = setCount > 0
         ? Array.from({ length: setCount }, function (_, i) {
             return '<span class="hub-set hub-set-label">S' + (i + 1) + '</span>';
