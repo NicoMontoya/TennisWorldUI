@@ -27,13 +27,30 @@ function extractFn(src, name) {
 
 function loadScoresHelpers() {
     const names = [
+        'parseEventType', 'parseDigestFilter', 'eventTypeOf', 'countByEventType',
+        'hasAnyEventType', 'preferredCategory', 'matchesForCategory',
+        'tournamentLabel', 'venueLabel', 'parseSetPair',
         'matchKeyOf', 'isFinishedStatus', 'isDelayedStatus', 'matchPhase', 'phaseLabel',
         'pairRoundKey', 'dedupePairRoundMatches',
         'matchTimeMs', 'mergeHubMatches', 'sortFlatMatches',
-        'liveByKeyFrom', 'mergeLiveOverlay', 'overlayMatchesForHub',
+        'liveByKeyFrom', 'withLiveMeta', 'mergeLiveOverlay', 'overlayMatchesForHub',
+        'formatMatchClock', 'statusText',
     ];
+    const prelude = [
+        extractConst(scoresSrc, 'EVENT_TYPES'),
+        extractConst(scoresSrc, 'CATEGORY_TABS'),
+        'function parseTour(value) { const t = String(value == null ? "" : value).trim().toUpperCase(); return t === "ATP" || t === "WTA" ? t : null; }',
+    ].join('\n');
     const body = names.map(n => extractFn(scoresSrc, n)).join('\n');
-    return new Function(body + '; return { matchKeyOf, isFinishedStatus, isDelayedStatus, matchPhase, phaseLabel, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, mergeLiveOverlay, overlayMatchesForHub };')();
+    return new Function(prelude + '\n' + body + '; return { EVENT_TYPES, CATEGORY_TABS, parseEventType, parseDigestFilter, eventTypeOf, countByEventType, hasAnyEventType, preferredCategory, matchesForCategory, tournamentLabel, venueLabel, parseSetPair, matchKeyOf, isFinishedStatus, isDelayedStatus, matchPhase, phaseLabel, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, withLiveMeta, mergeLiveOverlay, overlayMatchesForHub, formatMatchClock, statusText };')();
+}
+
+function extractConst(src, name) {
+    const start = src.indexOf(`const ${name} =`);
+    if (start < 0) throw new Error(`${name} const not found`);
+    let i = src.indexOf(';', start);
+    if (i < 0) throw new Error(`${name} const unclosed`);
+    return src.slice(start, i + 1);
 }
 
 describe('TW Security acceptance checklist', () => {
@@ -53,14 +70,14 @@ describe('TW Security acceptance checklist', () => {
         const apply = extractFn(scoresSrc, 'applyLiveToRow');
         expect(flash).toMatch(/node\.textContent = text/);
         expect(flash).toMatch(/node\.classList\.add\('score-flash'\)/);
-        expect(apply).toMatch(/flashText\(sets/);
+        expect(apply).toMatch(/paintSetColumns\(sets/);
         expect(apply).toMatch(/flashText\(game/);
         expect(apply).not.toMatch(/innerHTML/);
         expect(apply).not.toMatch(/insertAdjacentHTML/);
         expect(apply).not.toMatch(/replaceChildren/);
         expect(apply).not.toMatch(/renderMatchRow/);
         expect(apply).not.toMatch(/scoresList/);
-        expect(scoresSrc).toMatch(/querySelectorAll\('\.smr\[data-match-key\]'\)/);
+        expect(scoresSrc).toMatch(/querySelectorAll\('\.smc\[data-match-key\]'\)/);
     });
 
     it('3. Scores loads no Chart.js/jsDelivr/GA; CF Insights beacon is the only third-party script exception', () => {
@@ -76,13 +93,13 @@ describe('TW Security acceptance checklist', () => {
         expect(scoresHtml).toContain('data-cf-beacon=\'{"token": "942ca2c26fd44a78b8f81b74b22f5f41"}\'');
     });
 
-    it('4. PUBLIC_GET hub/livescore/calendar unchanged; SW is tw-v39', () => {
+    it('4. PUBLIC_GET hub/livescore/calendar unchanged; SW is tw-v40', () => {
         const sharedSrc = readFileSync(new URL('./shared.js', import.meta.url), 'utf8');
         expect(sharedSrc).toMatch(/const PUBLIC_GET_PATHS = \['\/api\/hub', '\/api\/livescore', '\/api\/calendar'\]/);
         expect(scoresSrc).toMatch(/apiFetch\(`\/api\/hub\?tour=\$\{encodeURIComponent\(tour\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
         expect(liveSrc).toMatch(/apiFetch\(`\/api\/livescore\?tour=\$\{encodeURIComponent\(t\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v39'/);
-        expect(swSrc).not.toMatch(/tw-v37/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v40'/);
+        expect(swSrc).not.toMatch(/tw-v39/);
         expect(swSrc).not.toMatch(/peakOverlap/);
     });
 
@@ -116,8 +133,8 @@ describe('scores digest security contracts', () => {
         expect(apply).not.toMatch(/innerHTML/);
         expect(apply).not.toMatch(/insertAdjacentHTML/);
         expect(scoresSrc).toMatch(/applyLiveToRow\(row, live/);
-        expect(scoresSrc).toMatch(/smr-sets/);
-        expect(scoresSrc).toMatch(/smr-game/);
+        expect(scoresSrc).toMatch(/smc-sets/);
+        expect(scoresSrc).toMatch(/smc-game/);
     });
 
     it('never interpolates the stored tour token into HTML', () => {
@@ -173,19 +190,23 @@ describe('Scores is a flat list only', () => {
         expect(scoresSrc).not.toMatch(/hubFeaturedMatch/);
     });
 
-    it('keeps compact header, tour toggle, chips, and live status', () => {
+    it('keeps compact header, tour toggle, category tabs, chips, and live status', () => {
         expect(scoresHtml).toMatch(/id="hubEyebrow"/);
         expect(scoresHtml).toMatch(/id="hubTournamentName"/);
         expect(scoresHtml).toMatch(/id="hubPageSub"/);
         expect(scoresHtml).toMatch(/id="tourToggle"/);
+        expect(scoresHtml).toMatch(/id="categoryTabs"/);
         expect(scoresHtml).toMatch(/data-filter="live"/);
         expect(scoresHtml).toMatch(/data-filter="upcoming"/);
-        expect(scoresHtml).toMatch(/data-filter="finished"/);
+        expect(scoresHtml).toMatch(/data-filter="completed"/);
         expect(scoresHtml).toMatch(/data-filter="all"/);
         expect(scoresHtml).toMatch(/id="liveStatusPill"/);
         expect(scoresHtml).toMatch(/id="digestUpdated"/);
         expect(scoresHtml).toMatch(/id="scoresList"/);
+        expect(scoresHtml).toMatch(/id="scoresTzNote"/);
+        expect(scoresHtml).toMatch(/class="scores-grid"/);
         expect(scoresSrc).toMatch(/Show all/);
+        expect(scoresSrc).toMatch(/No matches in this category/);
         expect(scoresSrc).not.toMatch(/Live & recent/);
     });
 });
@@ -409,9 +430,9 @@ describe('Delayed status is not Upcoming', () => {
         expect(phaseLabel({ status: 'Suspended' })).toBe('Delayed');
         expect(phaseLabel({ status: 'Not Started' })).toBe('Upcoming');
         expect(phaseLabel({ isLive: true })).toBe('Live');
-        expect(phaseLabel({ status: 'Finished' })).toBe('Finished');
-        expect(phaseLabel({ status: 'Walkover' })).toBe('Finished');
-        expect(scoresSrc).toMatch(/label\.textContent = phaseLabel\(/);
+        expect(phaseLabel({ status: 'Finished' })).toBe('Completed');
+        expect(phaseLabel({ status: 'Walkover' })).toBe('Completed');
+        expect(scoresSrc).toMatch(/label\.textContent = statusText\(/);
         expect(extractFn(scoresSrc, 'paintStatus')).not.toMatch(/Upcoming' : 'Finished'/);
         expect(extractFn(scoresSrc, 'applyLiveToRow')).not.toMatch(/isDone \? 'Finished' : 'Upcoming'/);
     });
@@ -502,10 +523,10 @@ describe('Scores always starts LiveEngine', () => {
     });
 });
 
-describe('service worker tw-v39', () => {
+describe('service worker tw-v40', () => {
     it('bumps cache and still precaches scores.html without peakOverlap', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v39'/);
-        expect(swSrc).not.toMatch(/tw-v38/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v40'/);
+        expect(swSrc).not.toMatch(/tw-v39/);
         expect(swSrc).toMatch(/'\/scores\.html'/);
         expect(swSrc).not.toMatch(/peakOverlap/);
     });
@@ -539,5 +560,175 @@ describe('calendar month overlap', () => {
             { name: 'Australian Open', startDate: '2026-01-19', endDate: '2026-02-01', status: 'completed' },
             2026, 9
         )).toBe(false);
+    });
+});
+
+describe('eventType allowlist + category tabs', () => {
+    const {
+        EVENT_TYPES, CATEGORY_TABS, parseEventType, eventTypeOf, countByEventType,
+        hasAnyEventType, preferredCategory, matchesForCategory, parseDigestFilter,
+        withLiveMeta, mergeLiveOverlay,
+    } = loadScoresHelpers();
+
+    it('maps the five client tabs to Worker eventType enums only', () => {
+        expect(EVENT_TYPES).toEqual([
+            'ATP Singles', 'ATP Doubles', 'WTA Singles', 'WTA Doubles', 'Mixed Doubles',
+        ]);
+        expect(CATEGORY_TABS.map(t => t.eventType).sort()).toEqual([...EVENT_TYPES].sort());
+        expect(CATEGORY_TABS.map(t => t.label)).toEqual([
+            "Men's Singles", "Women's Singles", "Men's Doubles", "Women's Doubles", 'Mixed Doubles',
+        ]);
+        expect(parseEventType('ATP Singles')).toBe('ATP Singles');
+        expect(parseEventType('WTA Doubles')).toBe('WTA Doubles');
+        expect(parseEventType('Mixed Doubles')).toBe('Mixed Doubles');
+    });
+
+    it('drops unknown, empty, and tour-only labels — never invents a category', () => {
+        expect(parseEventType(null)).toBeNull();
+        expect(parseEventType('')).toBeNull();
+        expect(parseEventType('ATP')).toBeNull();
+        expect(parseEventType('WTA')).toBeNull();
+        expect(parseEventType('atp singles')).toBeNull();
+        expect(parseEventType('ITF')).toBeNull();
+        expect(parseEventType('Challenger')).toBeNull();
+        expect(parseEventType('Junior Boys')).toBeNull();
+        expect(parseEventType('<script>alert(1)</script>')).toBeNull();
+        expect(eventTypeOf({ eventType: 'ATP' })).toBeNull();
+        expect(eventTypeOf({ eventType: 'ATP Singles' })).toBe('ATP Singles');
+        expect(hasAnyEventType([{ status: 'Not Started' }])).toBe(false);
+        expect(hasAnyEventType([{ eventType: 'ATP Singles' }])).toBe(true);
+        expect(scoresSrc).not.toMatch(/eventType=\$\{/);
+        expect(scoresSrc).not.toMatch(/searchParams\.set\('eventType'/);
+        expect(scoresHtml).not.toMatch(/[?&]eventType=/);
+    });
+
+    it('filters only by allowlisted eventType and does not infer from names or tour', () => {
+        const rows = [
+            { matchKey: 's', eventType: 'ATP Singles', player1Name: 'Sinner' },
+            { matchKey: 'd', eventType: 'ATP Doubles', player1Name: 'Ram / Salisbury' },
+            { matchKey: 'bare', player1Name: 'Alcaraz / no-type' },
+            { matchKey: 'junk', eventType: 'ITF', player1Name: 'Junior' },
+        ];
+        expect(matchesForCategory(rows, 'ATP Singles').map(m => m.matchKey)).toEqual(['s']);
+        expect(matchesForCategory(rows, 'ATP Doubles').map(m => m.matchKey)).toEqual(['d']);
+        expect(matchesForCategory(rows, 'WTA Singles')).toEqual([]);
+        expect(matchesForCategory(rows, 'ITF')).toEqual(rows);
+        expect(matchesForCategory(rows, null)).toEqual(rows);
+        const counts = countByEventType(rows);
+        expect(counts['ATP Singles']).toBe(1);
+        expect(counts['ATP Doubles']).toBe(1);
+        expect(counts['WTA Singles']).toBe(0);
+        expect(counts['Mixed Doubles']).toBe(0);
+    });
+
+    it('prefers the tour gender category and never picks the other tour without data', () => {
+        expect(preferredCategory('ATP', { 'ATP Singles': 3, 'WTA Singles': 2 })).toBe('ATP Singles');
+        expect(preferredCategory('WTA', { 'ATP Singles': 3, 'WTA Singles': 2 })).toBe('WTA Singles');
+        expect(preferredCategory('ATP', { 'WTA Singles': 4 })).toBeNull();
+        expect(preferredCategory('WTA', { 'ATP Doubles': 2 })).toBeNull();
+        expect(preferredCategory('ATP', { 'ATP Doubles': 1, 'Mixed Doubles': 1 })).toBe('ATP Doubles');
+        expect(preferredCategory('WTA', { 'Mixed Doubles': 2 })).toBe('Mixed Doubles');
+        expect(preferredCategory('ATP', {})).toBeNull();
+    });
+
+    it('copies allowlisted eventType / tournament / venue from live overlay only when hub lacks them', () => {
+        const hub = { matchKey: '1', player1Name: 'A' };
+        const live = {
+            matchKey: '1',
+            eventType: 'ATP Singles',
+            tournamentName: 'US Open',
+            venue: 'Arthur Ashe',
+        };
+        const next = withLiveMeta(hub, live, hub);
+        expect(next.eventType).toBe('ATP Singles');
+        expect(next.tournamentName).toBe('US Open');
+        expect(next.venue).toBe('Arthur Ashe');
+        expect(next).not.toBe(hub);
+
+        const junk = withLiveMeta({ matchKey: '2' }, { eventType: 'Junior' }, { matchKey: '2' });
+        expect(junk.eventType).toBeUndefined();
+
+        const merged = mergeLiveOverlay(
+            [{ matchKey: 'live-1', player1Name: 'A', status: 'Not Started' }],
+            [{ matchKey: 'live-1', isLive: true, status: 'InPlay', eventType: 'ATP Singles', tournamentName: 'US Open' }]
+        );
+        expect(merged[0].eventType).toBe('ATP Singles');
+        expect(merged[0].tournamentName).toBe('US Open');
+        expect(merged[0].isLive).toBe(true);
+    });
+
+    it('allowlists digest chips and never accepts free-text filters', () => {
+        expect(parseDigestFilter('live')).toBe('live');
+        expect(parseDigestFilter('completed')).toBe('completed');
+        expect(parseDigestFilter('upcoming')).toBe('upcoming');
+        expect(parseDigestFilter('all')).toBe('all');
+        expect(parseDigestFilter('finished')).toBeNull();
+        expect(parseDigestFilter('ATP Singles')).toBeNull();
+        expect(parseDigestFilter('<script>')).toBeNull();
+    });
+});
+
+describe('match card fields + set columns', () => {
+    const { tournamentLabel, venueLabel, parseSetPair, statusText, phaseLabel } = loadScoresHelpers();
+
+    it('uses tournamentName when present and hides venue when missing', () => {
+        expect(tournamentLabel({ tournamentName: 'US Open' }, 'Fallback')).toBe('US Open');
+        expect(tournamentLabel({}, 'U.S. Open')).toBe('U.S. Open');
+        expect(tournamentLabel({}, '')).toBe('');
+        expect(venueLabel({ venue: 'Arthur Ashe Stadium' })).toBe('Arthur Ashe Stadium');
+        expect(venueLabel({})).toBe('');
+        expect(venueLabel({ venue: '   ' })).toBe('');
+        expect(scoresSrc).toMatch(/venue\.hidden = !v/);
+        expect(scoresSrc).toMatch(/tourney\.hidden = !name/);
+        expect(scoresSrc).toMatch(/game\.hidden = !nextGame/);
+    });
+
+    it('parses object and string set scores into columns without inventing dashes', () => {
+        expect(parseSetPair({ p1: 6, p2: 4 })).toEqual({ p1: 6, p2: 4, loserTb: null });
+        expect(parseSetPair({ p1: 7, p2: 6, tiebreak: { p1: 7, p2: 5 } }))
+            .toEqual({ p1: 7, p2: 6, loserTb: 5 });
+        expect(parseSetPair('6-4')).toEqual({ p1: 6, p2: 4, loserTb: null });
+        expect(parseSetPair('7-6(5)')).toEqual({ p1: 7, p2: 6, loserTb: 5 });
+        expect(parseSetPair('')).toBeNull();
+        expect(parseSetPair(null)).toBeNull();
+        expect(extractFn(scoresSrc, 'paintSetColumns')).toMatch(/container\.hidden = true/);
+    });
+
+    it('paints Live / Completed / time and a winner marker on completed cards', () => {
+        expect(phaseLabel({ isLive: true })).toBe('Live');
+        expect(phaseLabel({ status: 'Finished' })).toBe('Completed');
+        expect(statusText({ status: 'Not Started', time: '14:30' })).toBe('14:30');
+        expect(statusText({ status: 'Delayed' })).toBe('Delayed');
+        expect(scoresSrc).toMatch(/smc-winner/);
+        expect(scoresSrc).toMatch(/aria-label', 'Winner'/);
+        expect(scoresSrc).toMatch(/mark\.hidden = !won/);
+    });
+});
+
+describe('Scores card grid + live overlay contracts', () => {
+    it('builds uniform cards with createElement and patches by matchKey', () => {
+        expect(scoresHtml).toMatch(/class="scores-grid"/);
+        expect(scoresSrc).toMatch(/el\('article', 'smc/);
+        expect(scoresSrc).toMatch(/function renderSkeleton\(/);
+        expect(scoresSrc).toMatch(/smc-skeleton/);
+        expect(scoresSrc).toMatch(/querySelectorAll\('\.smc\[data-match-key\]'\)/);
+        expect(extractFn(scoresSrc, 'flashText')).toMatch(/motionOk\(\)/);
+        expect(extractFn(scoresSrc, 'applyLiveToRow')).not.toMatch(/replaceChildren/);
+        expect(extractFn(scoresSrc, 'applyLiveToRow')).not.toMatch(/innerHTML/);
+        expect(scoresSrc).not.toMatch(/TW\.MatchCard/);
+        expect(scoresSrc).not.toMatch(/TW\.ProbBar/);
+        expect(scoresHtml).not.toMatch(/youtube|video|highlight/i);
+    });
+
+    it('lays out 1 column at 375 and 2 columns at 768, with scrolling category tabs', () => {
+        expect(stylesSrc).toMatch(/@media \(min-width: 768px\)/);
+        expect(stylesSrc).toMatch(/grid-template-columns: 1fr 1fr/);
+        expect(stylesSrc).toMatch(/@media \(max-width: 375px\)/);
+        expect(stylesSrc).toMatch(/\.category-tabs/);
+        expect(stylesSrc).toMatch(/overflow-x: auto/);
+        expect(stylesSrc).toMatch(/flex-wrap: nowrap/);
+        expect(stylesSrc).toMatch(/\.smc-tournament/);
+        expect(stylesSrc).toMatch(/\.smc-venue/);
+        expect(stylesSrc).toMatch(/\.smc-set-col/);
     });
 });

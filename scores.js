@@ -7,12 +7,103 @@
 // before paint so fixtures cannot flash Live → Not Started.
 // All API strings go through textContent or dataset — never concatenated
 // into innerHTML. Live flash: classList + textContent on score cells only.
-// Never rebuild a row from a live payload. TW Security checklist:
+// Never rebuild a card from a live payload. TW Security checklist:
 // textContent/dataset only; no CDN on this page; PUBLIC_GET intact;
-// parseTour allowlist; Peak Overlap fully removed.
-// Finished paint: Finished / Ended / Retired / Walkover (any case).
+// parseTour allowlist; parseEventType allowlist; Peak Overlap fully removed.
+// Finished paint: Finished / Ended / Retired / Walkover (any case) → Completed.
 // Delayed paint: Delayed / Postponed / Suspended (any case) — not Upcoming.
 // mergeLiveOverlay also promotes those terminal livescore rows onto hub.
+// Category tabs map to Worker eventType enums only — never free-text params.
+
+const EVENT_TYPES = Object.freeze([
+    'ATP Singles', 'ATP Doubles', 'WTA Singles', 'WTA Doubles', 'Mixed Doubles',
+]);
+
+const CATEGORY_TABS = Object.freeze([
+    { id: 'mens-singles',   label: "Men's Singles",   eventType: 'ATP Singles' },
+    { id: 'womens-singles', label: "Women's Singles", eventType: 'WTA Singles' },
+    { id: 'mens-doubles',   label: "Men's Doubles",   eventType: 'ATP Doubles' },
+    { id: 'womens-doubles', label: "Women's Doubles", eventType: 'WTA Doubles' },
+    { id: 'mixed-doubles',  label: 'Mixed Doubles',   eventType: 'Mixed Doubles' },
+]);
+
+function parseEventType(value) {
+    const t = String(value == null ? '' : value).trim();
+    return EVENT_TYPES.indexOf(t) >= 0 ? t : null;
+}
+
+function parseDigestFilter(value) {
+    return value === 'live' || value === 'upcoming' || value === 'completed' || value === 'all'
+        ? value
+        : null;
+}
+
+function eventTypeOf(m) {
+    return parseEventType(m && m.eventType);
+}
+
+function countByEventType(matches) {
+    const counts = Object.create(null);
+    EVENT_TYPES.forEach(t => { counts[t] = 0; });
+    (matches || []).forEach(m => {
+        const t = eventTypeOf(m);
+        if (t) counts[t] += 1;
+    });
+    return counts;
+}
+
+function hasAnyEventType(matches) {
+    return (matches || []).some(m => eventTypeOf(m));
+}
+
+function preferredCategory(tour, counts) {
+    const order = (typeof parseTour === 'function' ? parseTour(tour) : null) === 'WTA'
+        ? ['WTA Singles', 'WTA Doubles', 'Mixed Doubles']
+        : ['ATP Singles', 'ATP Doubles', 'Mixed Doubles'];
+    for (let i = 0; i < order.length; i++) {
+        const t = order[i];
+        if (counts && counts[t] > 0) return t;
+    }
+    return null;
+}
+
+function matchesForCategory(matches, eventType) {
+    const allowed = parseEventType(eventType);
+    if (!allowed) return matches || [];
+    return (matches || []).filter(m => eventTypeOf(m) === allowed);
+}
+
+function tournamentLabel(m, fallback) {
+    const fromMatch = m && m.tournamentName ? String(m.tournamentName).trim() : '';
+    if (fromMatch) return fromMatch;
+    return String(fallback == null ? '' : fallback).trim();
+}
+
+function venueLabel(m) {
+    return m && m.venue ? String(m.venue).trim() : '';
+}
+
+function parseSetPair(s) {
+    if (s == null || s === '') return null;
+    if (typeof s === 'string') {
+        const m = String(s).trim().match(/^(\d+)\s*-\s*(\d+)(?:\((\d+)\))?$/);
+        if (!m) return null;
+        return {
+            p1: Number(m[1]),
+            p2: Number(m[2]),
+            loserTb: m[3] != null ? Number(m[3]) : null,
+        };
+    }
+    if (typeof s === 'object') {
+        if (s.p1 == null && s.p2 == null) return null;
+        let loserTb = null;
+        if (s.tiebreak) {
+            loserTb = Math.min(s.tiebreak.p1, s.tiebreak.p2);
+        }
+        return { p1: s.p1, p2: s.p2, loserTb };
+    }
+    return null;
+}
 
 function matchKeyOf(m) {
     if (!m) return '';
@@ -43,7 +134,7 @@ function phaseLabel(m) {
     if (phase === 'live') return 'Live';
     if (phase === 'upcoming') return 'Upcoming';
     if (phase === 'delayed') return 'Delayed';
-    return 'Finished';
+    return 'Completed';
 }
 
 function pairRoundKey(m) {
@@ -114,6 +205,19 @@ function liveByKeyFrom(matches) {
     return map;
 }
 
+function withLiveMeta(row, live, hub) {
+    const et = parseEventType(live && live.eventType);
+    const tName = live && live.tournamentName && !(hub && hub.tournamentName) ? live.tournamentName : null;
+    const venue = live && live.venue && !(hub && hub.venue) ? live.venue : null;
+    const needType = !!(et && !parseEventType(hub && hub.eventType));
+    if (!needType && !tName && !venue) return row;
+    const next = row === hub ? Object.assign({}, hub) : row;
+    if (needType) next.eventType = et;
+    if (tName) next.tournamentName = tName;
+    if (venue) next.venue = venue;
+    return next;
+}
+
 // Overlay livescore / previously painted live fields onto hub fixtures.
 // Hub never carries isLive; without this, interval reloads remount
 // InPlay rows as Not Started / empty scores.
@@ -129,13 +233,13 @@ function mergeLiveOverlay(hubMatches, liveMatches) {
             });
             if (live.setScores != null) next.setScores = live.setScores;
             if (live.currentGame != null) next.currentGame = live.currentGame;
-            return next;
+            return withLiveMeta(next, live, hub);
         }
         if (isFinishedStatus(hub.status)) {
             if ((!hub.setScores || !hub.setScores.length) && live.setScores && live.setScores.length) {
-                return Object.assign({}, hub, { setScores: live.setScores, isLive: false });
+                return withLiveMeta(Object.assign({}, hub, { setScores: live.setScores, isLive: false }), live, hub);
             }
-            return Object.assign({}, hub, { isLive: false });
+            return withLiveMeta(Object.assign({}, hub, { isLive: false }), live, hub);
         }
         // Promote Finished / Ended / Retired / Walkover onto a Not Started
         // hub row. Copy scores/winner only when livescore actually has them.
@@ -147,7 +251,7 @@ function mergeLiveOverlay(hubMatches, liveMatches) {
             if (live.setScores && live.setScores.length) next.setScores = live.setScores;
             if (live.currentGame != null) next.currentGame = live.currentGame;
             if (live.winner != null && live.winner !== '') next.winner = live.winner;
-            return next;
+            return withLiveMeta(next, live, hub);
         }
         // Promote Delayed / Postponed / Suspended onto a Not Started hub row.
         // Copy scores only when livescore actually has them — never invent.
@@ -158,12 +262,12 @@ function mergeLiveOverlay(hubMatches, liveMatches) {
             });
             if (live.setScores && live.setScores.length) next.setScores = live.setScores;
             if (live.currentGame != null) next.currentGame = live.currentGame;
-            return next;
+            return withLiveMeta(next, live, hub);
         }
         if (live.setScores && live.setScores.length && (!hub.setScores || !hub.setScores.length)) {
-            return Object.assign({}, hub, { setScores: live.setScores, isLive: false });
+            return withLiveMeta(Object.assign({}, hub, { setScores: live.setScores, isLive: false }), live, hub);
         }
-        return hub;
+        return withLiveMeta(hub, live, hub);
     });
 }
 
@@ -217,6 +321,15 @@ function formatMatchClock(m) {
     return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
 }
 
+function statusText(m) {
+    const phase = matchPhase(m);
+    if (phase === 'upcoming') {
+        const clock = formatMatchClock(m);
+        return clock || 'Upcoming';
+    }
+    return phaseLabel(m);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
 
     const HUB_INTERVAL_MS = 2 * 60 * 1000;
@@ -225,6 +338,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let hubTimer = null;
     let flatMatches = [];
     let digestFilter = 'all';
+    let categoryFilter = null;
     let lastUpdatedAt = null;
     let updatedTimer = null;
     let listMounted = false;
@@ -245,6 +359,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return (matches || []).some(m => m && m.isLive);
     }
 
+    function motionOk() {
+        try {
+            return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        } catch {
+            return true;
+        }
+    }
+
     function syncTourQuery(tour) {
         const allowed = parseTour(tour);
         if (!allowed) return;
@@ -259,6 +381,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentTour = allowed;
         writeStoredTour(allowed);
         syncTourQuery(allowed);
+        categoryFilter = null;
         paintTourToggle();
         if (typeof LiveEngine !== 'undefined') LiveEngine.setTour(allowed);
         listMounted = false;
@@ -329,7 +452,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const eyeEl  = document.getElementById('hubEyebrow');
         const subEl  = document.getElementById('hubPageSub');
         if (eyeEl) eyeEl.textContent = 'Scores';
-        if (nameEl) nameEl.textContent = (tournament && tournament.name) || 'Scores';
+        if (nameEl) nameEl.textContent = 'Scores';
         if (subEl) subEl.textContent = pageSub(anyLive(matches));
         const pill = document.getElementById('hubSurface');
         if (pill) {
@@ -346,12 +469,69 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ── Flat list ──────────────────────────────────────────────────────────
+    function mountCategoryTabs() {
+        const nav = document.getElementById('categoryTabs');
+        if (!nav || nav.dataset.mounted === '1') return;
+        CATEGORY_TABS.forEach(tab => {
+            const btn = el('button', 'category-tab', tab.label);
+            btn.type = 'button';
+            btn.dataset.eventType = tab.eventType;
+            btn.setAttribute('role', 'tab');
+            btn.setAttribute('aria-selected', 'false');
+            btn.disabled = true;
+            nav.appendChild(btn);
+        });
+        nav.dataset.mounted = '1';
+        nav.addEventListener('click', (e) => {
+            const btn = e.target.closest('.category-tab');
+            if (!btn || btn.disabled) return;
+            const next = parseEventType(btn.dataset.eventType);
+            if (!next || next === categoryFilter) return;
+            setCategory(next);
+        });
+    }
+
+    function paintCategoryTabs(matches) {
+        const counts = countByEventType(matches);
+        const nav = document.getElementById('categoryTabs');
+        if (!nav) return;
+        nav.querySelectorAll('.category-tab').forEach(btn => {
+            const t = parseEventType(btn.dataset.eventType);
+            const n = t ? (counts[t] || 0) : 0;
+            btn.disabled = n === 0;
+            btn.classList.toggle('is-empty', n === 0);
+            const on = !!(t && t === categoryFilter);
+            btn.classList.toggle('is-active', on);
+            btn.setAttribute('aria-selected', String(on));
+        });
+    }
+
+    function setCategory(next) {
+        const allowed = next == null ? null : parseEventType(next);
+        if (allowed === categoryFilter) return;
+        categoryFilter = allowed;
+        paintCategoryTabs(flatMatches);
+        listMounted = false;
+        renderFlatList(flatMatches);
+    }
+
+    function resolveCategory(matches) {
+        const counts = countByEventType(matches);
+        if (categoryFilter && counts[categoryFilter] > 0) return categoryFilter;
+        return preferredCategory(currentTour, counts);
+    }
+
+    // ── Flat card grid ─────────────────────────────────────────────────────
+
+    function scopedMatches(matches) {
+        return matchesForCategory(matches || [], categoryFilter);
+    }
 
     function filteredMatches(matches) {
-        const list = matches || [];
+        const list = scopedMatches(matches);
         if (digestFilter === 'all') return list;
-        return list.filter(m => matchPhase(m) === digestFilter);
+        const phase = digestFilter === 'completed' ? 'finished' : digestFilter;
+        return list.filter(m => matchPhase(m) === phase);
     }
 
     function paintDigestCounts(matches) {
@@ -364,7 +544,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setFilter(next, rerender) {
-        const allowed = next === 'live' || next === 'upcoming' || next === 'finished' || next === 'all' ? next : null;
+        const allowed = parseDigestFilter(next);
         if (!allowed) return;
         digestFilter = allowed;
         const chips = document.getElementById('digestChips');
@@ -378,13 +558,28 @@ document.addEventListener('DOMContentLoaded', () => {
         if (rerender !== false) renderFlatList(flatMatches);
     }
 
+    function renderSkeleton(list) {
+        const frag = document.createDocumentFragment();
+        for (let i = 0; i < 4; i++) {
+            const card = el('article', 'smc smc-skeleton');
+            card.setAttribute('aria-hidden', 'true');
+            card.appendChild(el('div', 'skeleton-line'));
+            card.appendChild(el('div', 'skeleton-line'));
+            card.appendChild(el('div', 'skeleton-block smc-skel-block'));
+            frag.appendChild(card);
+        }
+        list.replaceChildren(frag);
+    }
+
     function renderFlatList(matches) {
         const section = document.getElementById('scoresSection');
         const list    = document.getElementById('scoresList');
         if (!section || !list) return;
 
         flatMatches = matches || [];
-        paintDigestCounts(flatMatches);
+        paintCategoryTabs(flatMatches);
+        const scoped = scopedMatches(flatMatches);
+        paintDigestCounts(scoped);
 
         const visible = filteredMatches(flatMatches);
         section.hidden = false;
@@ -396,11 +591,19 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        if (categoryFilter && !scoped.length) {
+            const empty = el('div', 'digest-empty');
+            empty.appendChild(el('p', 'digest-empty-msg', 'No matches in this category'));
+            list.replaceChildren(empty);
+            listMounted = false;
+            return;
+        }
+
         if (!visible.length) {
             const empty = el('div', 'digest-empty');
             const msg = el('p', 'digest-empty-msg',
                 digestFilter === 'live' ? 'No live matches right now.'
-                : digestFilter === 'finished' ? 'No finished matches yet.'
+                : digestFilter === 'completed' ? 'No completed matches yet.'
                 : 'No upcoming matches in this filter.');
             const btn = el('button', 'digest-empty-all', 'Show all');
             btn.type = 'button';
@@ -413,7 +616,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const existing = listMounted ? new Map(
-            Array.from(list.querySelectorAll('.smr[data-match-key]')).map(row => [row.dataset.matchKey, row])
+            Array.from(list.querySelectorAll('.smc[data-match-key]')).map(row => [row.dataset.matchKey, row])
         ) : null;
 
         const canPatch = !!(existing && existing.size === visible.length && visible.every(m => existing.has(matchKeyOf(m))));
@@ -432,10 +635,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function playerBlock(side, name, pkey, seed, won, isDone, winner) {
-        const cell = el('span', 'smr-player smr-' + side + (isDoublesName(name) ? ' smr-doubles' : ''));
-        if (seed) cell.appendChild(el('span', 'smr-seed', String(seed)));
-        const pname = el('span', 'smr-name' + (won ? ' smr-won' : '') + (isDone && !won && winner ? ' smr-lost' : ''));
+    function playerRow(side, name, pkey, seed) {
+        const row = el('div', 'smc-row smc-' + side + (isDoublesName(name) ? ' smc-doubles' : ''));
+        row.dataset.side = side;
+        if (seed) row.appendChild(el('span', 'smc-seed', String(seed)));
+        const pname = el('span', 'smc-name');
         pname.textContent = name || '—';
         if (pkey) {
             pname.setAttribute('data-open-player', '');
@@ -444,97 +648,175 @@ document.addEventListener('DOMContentLoaded', () => {
             pname.dataset.tour = currentTour;
             pname.dataset.country = '';
         }
-        cell.appendChild(pname);
-        return cell;
+        row.appendChild(pname);
+        const mark = el('span', 'smc-winner');
+        mark.textContent = '●';
+        mark.setAttribute('aria-label', 'Winner');
+        mark.hidden = true;
+        row.appendChild(mark);
+        return row;
     }
 
     function renderMatchRow(m) {
         const isDone = matchPhase(m) === 'finished';
         const isLive = !!m.isLive;
-        const winner = matchWinner(m);
-        const p1Won  = winner === 'p1';
-        const p2Won  = winner === 'p2';
         const key    = matchKeyOf(m);
         const phase  = matchPhase(m);
 
-        const row = el('article', 'smr smr-' + phase + (isLive ? ' smr-is-live' : '') + (isDone ? ' smr-is-done' : ''));
-        if (key) row.dataset.matchKey = key;
-        row.dataset.phase = phase;
+        const card = el('article', 'smc smc-' + phase + (isLive ? ' smc-is-live' : '') + (isDone ? ' smc-is-done' : ''));
+        if (key) card.dataset.matchKey = key;
+        card.dataset.phase = phase;
 
-        const status = el('div', 'smr-status');
-        const badge = el('span', 'smr-badge');
-        const dot = el('span', 'smr-dot');
+        const head = el('div', 'smc-head');
+        const kicker = el('div', 'smc-kicker');
+        const round = el('span', 'smc-round');
+        const badge = el('span', 'smc-badge');
+        const dot = el('span', 'smc-dot');
         dot.setAttribute('aria-hidden', 'true');
-        const label = el('span', 'smr-badge-label');
+        const label = el('span', 'smc-badge-label');
         badge.appendChild(dot);
         badge.appendChild(label);
-        status.appendChild(badge);
-        row.appendChild(status);
+        kicker.appendChild(round);
+        kicker.appendChild(badge);
+        const game = el('span', 'smc-game');
+        head.appendChild(kicker);
+        head.appendChild(game);
+        card.appendChild(head);
 
-        const players = el('div', 'smr-players');
-        players.appendChild(playerBlock('p1', m.player1Name, m.player1Key, m.player1Seed, p1Won, isDone, winner));
-        players.appendChild(el('span', 'smr-vs', 'vs'));
-        players.appendChild(playerBlock('p2', m.player2Name, m.player2Key, m.player2Seed, p2Won, isDone, winner));
-        row.appendChild(players);
+        const event = el('div', 'smc-event');
+        const tourney = el('span', 'smc-tournament');
+        const venue = el('span', 'smc-venue');
+        event.appendChild(tourney);
+        event.appendChild(venue);
+        card.appendChild(event);
 
-        const scores = el('div', 'smr-scores');
-        const sets = el('span', 'smr-sets');
-        const game = el('span', 'smr-game');
-        scores.appendChild(sets);
-        scores.appendChild(game);
-        row.appendChild(scores);
+        const body = el('div', 'smc-body');
+        const players = el('div', 'smc-players');
+        players.appendChild(playerRow('p1', m.player1Name, m.player1Key, m.player1Seed));
+        players.appendChild(playerRow('p2', m.player2Name, m.player2Key, m.player2Seed));
+        const sets = el('div', 'smc-sets');
+        body.appendChild(players);
+        body.appendChild(sets);
+        card.appendChild(body);
 
-        const meta = el('div', 'smr-meta');
-        const round = el('span', 'smr-round');
-        const time = el('span', 'smr-time');
-        meta.appendChild(round);
-        meta.appendChild(time);
-        row.appendChild(meta);
-
-        paintRow(row, m, { flash: false });
-        return row;
+        paintRow(card, m, { flash: false });
+        return card;
     }
 
     function paintStatus(badge, m) {
         const phase = matchPhase(m);
-        badge.className = 'smr-badge smr-badge-' + phase;
-        const label = badge.querySelector('.smr-badge-label');
+        badge.className = 'smc-badge smc-badge-' + phase;
+        const label = badge.querySelector('.smc-badge-label');
         if (label) {
-            label.textContent = phaseLabel(m);
+            label.textContent = statusText(m);
         }
         badge.hidden = false;
     }
 
+    function paintWinner(card, m) {
+        const isDone = matchPhase(m) === 'finished';
+        const winner = matchWinner(m);
+        card.querySelectorAll('.smc-row').forEach(row => {
+            const side = row.dataset.side;
+            const won = isDone && ((side === 'p1' && winner === 'p1') || (side === 'p2' && winner === 'p2'));
+            const lost = !!(isDone && winner && !won);
+            row.classList.toggle('smc-won', won);
+            row.classList.toggle('smc-lost', lost);
+            const mark = row.querySelector('.smc-winner');
+            if (mark) mark.hidden = !won;
+        });
+    }
+
+    function paintSetCell(node, val, opp, opts) {
+        if (!node) return;
+        const valEl = node.querySelector('.smc-set-val');
+        const tbEl  = node.querySelector('.smc-set-tb');
+        const next  = val == null || val === '' ? '' : String(val);
+        if (opts && opts.flash) flashText(valEl, next);
+        else if (valEl) valEl.textContent = next;
+        if (tbEl) {
+            const tb = opts && opts.tb != null ? String(opts.tb) : '';
+            tbEl.textContent = tb;
+            tbEl.hidden = !tb;
+        }
+        const num = Number(val);
+        const other = Number(opp);
+        const comparable = !isNaN(num) && !isNaN(other);
+        node.classList.toggle('smc-set-w', comparable && num > other);
+        node.classList.toggle('smc-set-l', comparable && num < other);
+        node.classList.toggle('smc-set-c', !!(opts && opts.current));
+    }
+
+    function ensureSetColumns(container, count) {
+        let cols = Array.from(container.querySelectorAll('.smc-set-col'));
+        if (cols.length === count) return cols;
+        container.replaceChildren();
+        for (let i = 0; i < count; i++) {
+            const col = el('div', 'smc-set-col');
+            col.dataset.setIdx = String(i);
+            ['p1', 'p2'].forEach(side => {
+                const cell = el('span', 'smc-set');
+                cell.dataset.side = side;
+                cell.appendChild(el('span', 'smc-set-val'));
+                const tb = el('span', 'smc-set-tb');
+                tb.hidden = true;
+                cell.appendChild(tb);
+                col.appendChild(cell);
+            });
+            container.appendChild(col);
+        }
+        return Array.from(container.querySelectorAll('.smc-set-col'));
+    }
+
+    function paintSetColumns(container, m, opts) {
+        if (!container) return;
+        const sets = (m && m.setScores ? m.setScores : []).map(parseSetPair).filter(Boolean);
+        if (!sets.length) {
+            container.replaceChildren();
+            container.hidden = true;
+            return;
+        }
+        container.hidden = false;
+        const cols = ensureSetColumns(container, sets.length);
+        const isLive = matchPhase(m) === 'live';
+        const flash = !!(opts && opts.flash);
+        sets.forEach((s, i) => {
+            const col = cols[i];
+            const last = i === sets.length - 1;
+            paintSetCell(col.querySelector('[data-side="p1"]'), s.p1, s.p2, {
+                flash, current: isLive && last, tb: s.p1 > s.p2 ? s.loserTb : null,
+            });
+            paintSetCell(col.querySelector('[data-side="p2"]'), s.p2, s.p1, {
+                flash, current: isLive && last, tb: s.p2 > s.p1 ? s.loserTb : null,
+            });
+        });
+    }
+
     function paintRow(row, m, opts) {
         const flash = !!(opts && opts.flash);
-        const badge = row.querySelector('.smr-badge');
-        const sets  = row.querySelector('.smr-sets');
-        const game  = row.querySelector('.smr-game');
-        const round = row.querySelector('.smr-round');
-        const time  = row.querySelector('.smr-time');
+        const badge = row.querySelector('.smc-badge');
+        const sets  = row.querySelector('.smc-sets');
+        const game  = row.querySelector('.smc-game');
+        const round = row.querySelector('.smc-round');
+        const tourney = row.querySelector('.smc-tournament');
+        const venue = row.querySelector('.smc-venue');
         if (!badge || !sets || !game) return;
 
         const phase = matchPhase(m);
         const isLive = phase === 'live';
         const isDone = phase === 'finished';
-        row.classList.remove('smr-live', 'smr-upcoming', 'smr-delayed', 'smr-finished', 'smr-is-live', 'smr-is-done');
-        row.classList.add('smr', 'smr-' + phase);
-        row.classList.toggle('smr-is-live', isLive);
-        row.classList.toggle('smr-is-done', isDone);
+        row.classList.remove('smc-live', 'smc-upcoming', 'smc-delayed', 'smc-finished', 'smc-is-live', 'smc-is-done');
+        row.classList.add('smc', 'smc-' + phase);
+        row.classList.toggle('smc-is-live', isLive);
+        row.classList.toggle('smc-is-done', isDone);
         row.dataset.phase = phase;
 
         paintStatus(badge, m);
+        paintSetColumns(sets, m, { flash });
 
-        const nextSets = scoreText(m);
         const nextGame = gameText(m);
-        if (flash) {
-            flashText(sets, nextSets);
-            flashText(game, nextGame);
-        } else {
-            sets.textContent = nextSets;
-            game.textContent = nextGame;
-        }
-        sets.hidden = !nextSets;
+        if (flash) flashText(game, nextGame);
+        else game.textContent = nextGame;
         game.hidden = !nextGame;
 
         if (round) {
@@ -542,11 +824,17 @@ document.addEventListener('DOMContentLoaded', () => {
             round.textContent = r;
             round.hidden = !r;
         }
-        if (time) {
-            const clock = formatMatchClock(m);
-            time.textContent = clock ? '· ' + clock : '';
-            time.hidden = !clock;
+        if (tourney) {
+            const name = tournamentLabel(m, currentTournamentName);
+            tourney.textContent = name;
+            tourney.hidden = !name;
         }
+        if (venue) {
+            const v = venueLabel(m);
+            venue.textContent = v;
+            venue.hidden = !v;
+        }
+        paintWinner(row, m);
     }
 
     function flashText(node, next) {
@@ -554,49 +842,45 @@ document.addEventListener('DOMContentLoaded', () => {
         const text = next == null ? '' : String(next);
         if (node.textContent === text) return;
         node.textContent = text;
+        if (!motionOk()) return;
         node.classList.remove('score-flash');
         void node.offsetWidth;
         node.classList.add('score-flash');
     }
 
     // TW Security #2: live patches existing score cells only. Never remount
-    // the row or interpolate the live payload into HTML.
+    // the card or interpolate the live payload into HTML.
     function applyLiveToRow(row, live, opts) {
         if (!row || !live) return;
         const flash = !(opts && opts.flash === false);
-        const sets = row.querySelector('.smr-sets');
-        const game = row.querySelector('.smr-game');
-        const badge = row.querySelector('.smr-badge');
-        const label = row.querySelector('.smr-badge-label');
+        const sets = row.querySelector('.smc-sets');
+        const game = row.querySelector('.smc-game');
+        const badge = row.querySelector('.smc-badge');
+        const label = row.querySelector('.smc-badge-label');
         const phase = matchPhase(live);
         const isLive = phase === 'live';
         const isDone = phase === 'finished';
 
-        row.classList.remove('smr-live', 'smr-upcoming', 'smr-delayed', 'smr-finished', 'smr-is-live', 'smr-is-done');
-        row.classList.add('smr', 'smr-' + phase);
-        row.classList.toggle('smr-is-live', isLive);
-        row.classList.toggle('smr-is-done', isDone);
+        row.classList.remove('smc-live', 'smc-upcoming', 'smc-delayed', 'smc-finished', 'smc-is-live', 'smc-is-done');
+        row.classList.add('smc', 'smc-' + phase);
+        row.classList.toggle('smc-is-live', isLive);
+        row.classList.toggle('smc-is-done', isDone);
         row.dataset.phase = phase;
 
         if (badge) {
-            badge.className = 'smr-badge smr-badge-' + phase;
+            badge.className = 'smc-badge smc-badge-' + phase;
             badge.hidden = false;
         }
         if (label) {
-            label.textContent = phaseLabel(live);
+            label.textContent = statusText(live);
         }
 
-        const nextSets = scoreText(live);
+        paintSetColumns(sets, live, { flash });
         const nextGame = gameText(live);
-        if (flash) {
-            flashText(sets, nextSets);
-            flashText(game, nextGame);
-        } else {
-            if (sets) sets.textContent = nextSets;
-            if (game) game.textContent = nextGame;
-        }
-        if (sets) sets.hidden = !nextSets;
+        if (flash) flashText(game, nextGame);
+        else if (game) game.textContent = nextGame;
         if (game) game.hidden = !nextGame;
+        paintWinner(row, live);
     }
 
     function stampDigestUpdated(iso) {
@@ -624,6 +908,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function mergeLiveIntoPainted(prev, live) {
+        const next = Object.assign({}, prev, {
+            isLive: !!live.isLive,
+            status: live.status || prev.status,
+        });
+        if (live.setScores != null) next.setScores = live.setScores;
+        if (live.currentGame != null) next.currentGame = live.currentGame;
+        if (live.winner != null && live.winner !== '') next.winner = live.winner;
+        return withLiveMeta(next, live, prev);
+    }
+
     // ── Live updates: patch score cells by matchKey, do not remount ────────
     window.addEventListener('tw:live-update', ({ detail }) => {
         const matches = detail?.matches || [];
@@ -636,22 +931,35 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         let scoreChanged = false;
-        document.querySelectorAll('.smr[data-match-key]').forEach(row => {
-            const live = byKey.get(row.dataset.matchKey);
-            if (!live) return;
-            const prevScore = row.querySelector('.smr-sets')?.textContent || '';
-            const prevGame  = row.querySelector('.smr-game')?.textContent || '';
-            applyLiveToRow(row, live);
-            const nextScore = scoreText(live);
-            const nextGame  = gameText(live);
-            if (prevScore !== nextScore || prevGame !== nextGame) scoreChanged = true;
-            const idx = flatMatches.findIndex(m => matchKeyOf(m) === row.dataset.matchKey);
-            if (idx >= 0) {
-                flatMatches[idx] = Object.assign({}, flatMatches[idx], live);
-            }
+        flatMatches = flatMatches.map(prev => {
+            const live = byKey.get(matchKeyOf(prev));
+            return live ? mergeLiveIntoPainted(prev, live) : prev;
         });
 
-        if (scoreChanged) paintDigestCounts(flatMatches);
+        const visible = filteredMatches(flatMatches);
+        const existing = new Map(
+            Array.from(document.querySelectorAll('.smc[data-match-key]')).map(row => [row.dataset.matchKey, row])
+        );
+        const canPatch = existing.size === visible.length && visible.every(m => existing.has(matchKeyOf(m)));
+
+        if (canPatch) {
+            visible.forEach(m => {
+                const row = existing.get(matchKeyOf(m));
+                const prevScore = row.querySelector('.smc-sets')?.textContent || '';
+                const prevGame  = row.querySelector('.smc-game')?.textContent || '';
+                applyLiveToRow(row, m);
+                const nextScore = scoreText(m);
+                const nextGame  = gameText(m);
+                if (prevScore !== nextScore || prevGame !== nextGame) scoreChanged = true;
+            });
+        } else {
+            listMounted = false;
+            renderFlatList(flatMatches);
+            scoreChanged = true;
+        }
+
+        if (scoreChanged) paintDigestCounts(scopedMatches(flatMatches));
+        paintCategoryTabs(flatMatches);
         const subEl = document.getElementById('hubPageSub');
         if (subEl) subEl.textContent = pageSub(anyLive(flatMatches));
     });
@@ -715,8 +1023,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const section = document.getElementById('scoresSection');
         if (section) section.hidden = false;
         if (list && !listMounted) {
-            const loading = el('div', 'digest-loading', 'Loading match data…');
-            list.replaceChildren(loading);
+            renderSkeleton(list);
         }
 
         try {
@@ -727,6 +1034,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!data || !data.tournament) {
                 currentTournamentKey = null;
                 currentTournamentName = '';
+                categoryFilter = null;
                 paintHeader(null, []);
                 renderFlatList([]);
                 return;
@@ -738,6 +1046,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const merged = sortFlatMatches(dedupePairRoundMatches(
                 mergeLiveOverlay(mergeHubMatches(data), liveOverlaySource())
             ));
+            categoryFilter = resolveCategory(merged);
             paintHeader(data.tournament, merged);
             renderFlatList(merged);
             ensureLiveEngine();
@@ -763,12 +1072,13 @@ document.addEventListener('DOMContentLoaded', () => {
         chips.addEventListener('click', (e) => {
             const btn = e.target.closest('.digest-chip');
             if (!btn) return;
-            const next = btn.dataset.filter;
+            const next = parseDigestFilter(btn.dataset.filter);
             if (!next || next === digestFilter) return;
             setFilter(next);
         });
     }
 
+    mountCategoryTabs();
     paintTourToggle();
     if (typeof LiveEngine !== 'undefined') LiveEngine.setTour(currentTour);
 
