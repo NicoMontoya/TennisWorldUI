@@ -15,10 +15,15 @@ TW.MatchCard = function MatchCard(m, tournamentName) {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
+    function isFinishedStatus(status) {
+        const s = String(status == null ? '' : status).trim().toLowerCase();
+        return s === 'finished' || s === 'ended' || s === 'retired' || s === 'walkover';
+    }
+
     function statusType(match) {
         if (match.isLive || match.status === '1') return 'live';
-        if (match.status === 'Finished')          return 'finished';
-        if (match.status === 'Cancelled')         return 'cancelled';
+        if (isFinishedStatus(match.status))       return 'finished';
+        if (String(match.status || '').trim().toLowerCase() === 'cancelled') return 'cancelled';
         return 'upcoming';
     }
 
