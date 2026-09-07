@@ -1,13 +1,15 @@
 // ===================================
 // TennisWorld — Scores / Hub page
 // ===================================
-// Primary: GET /api/hub (anonymous). Livescore overlay via LiveEngine
-// only while any match isLive. All API strings go through textContent
-// or dataset — never concatenated into innerHTML.
-// Live flash: classList + textContent on score cells only. Never rebuild
-// a row from a live payload. TW Security checklist: textContent/dataset
-// only; no CDN on this page; PUBLIC_GET intact; parseTour allowlist;
-// Peak Overlap fully removed.
+// Primary: GET /api/hub (anonymous). Hub fixtures do not carry isLive —
+// LiveEngine always runs on Scores and overlays GET /api/livescore.
+// Hub interval reloads merge last live fields onto matching matchKeys
+// before paint so fixtures cannot flash Live → Not Started.
+// All API strings go through textContent or dataset — never concatenated
+// into innerHTML. Live flash: classList + textContent on score cells only.
+// Never rebuild a row from a live payload. TW Security checklist:
+// textContent/dataset only; no CDN on this page; PUBLIC_GET intact;
+// parseTour allowlist; Peak Overlap fully removed.
 
 function matchKeyOf(m) {
     if (!m) return '';
@@ -41,6 +43,53 @@ function mergeHubMatches(data) {
     if (data) add(data.featuredMatch);
     (data && data.recentResults ? data.recentResults : []).forEach(add);
     return Array.from(map.values());
+}
+
+function liveByKeyFrom(matches) {
+    const map = new Map();
+    (matches || []).forEach(m => {
+        const k = matchKeyOf(m);
+        if (k) map.set(k, m);
+    });
+    return map;
+}
+
+// Overlay livescore / previously painted live fields onto hub fixtures.
+// Hub never carries isLive; without this, interval reloads remount
+// InPlay rows as Not Started / empty scores.
+function mergeLiveOverlay(hubMatches, liveMatches) {
+    const liveByKey = liveByKeyFrom(liveMatches);
+    return (hubMatches || []).map(hub => {
+        const live = liveByKey.get(matchKeyOf(hub));
+        if (!live) return hub;
+        if (live.isLive) {
+            const next = Object.assign({}, hub, {
+                isLive: true,
+                status: live.status || hub.status,
+            });
+            if (live.setScores != null) next.setScores = live.setScores;
+            if (live.currentGame != null) next.currentGame = live.currentGame;
+            return next;
+        }
+        if (hub.status === 'Finished') {
+            if ((!hub.setScores || !hub.setScores.length) && live.setScores && live.setScores.length) {
+                return Object.assign({}, hub, { setScores: live.setScores, isLive: false });
+            }
+            return Object.assign({}, hub, { isLive: false });
+        }
+        if (live.setScores && live.setScores.length && (!hub.setScores || !hub.setScores.length)) {
+            return Object.assign({}, hub, { setScores: live.setScores, isLive: false });
+        }
+        return hub;
+    });
+}
+
+function overlayMatchesForHub(engineLast, paintedMatches) {
+    if (Array.isArray(engineLast) && engineLast.length) return engineLast;
+    if (engineLast === null || engineLast === undefined) {
+        return (paintedMatches || []).filter(m => m && (m.isLive || (m.setScores && m.setScores.length) || m.currentGame));
+    }
+    return [];
 }
 
 function sortFlatMatches(matches) {
@@ -543,11 +592,17 @@ document.addEventListener('DOMContentLoaded', () => {
         listMounted = false;
     }
 
-    function startLiveOverlayIfNeeded(payload) {
+    function ensureLiveEngine() {
         if (typeof LiveEngine === 'undefined') return;
         LiveEngine.setTour(currentTour);
-        const live = !!(anyLive(payload && payload.todaysMatches) || anyLive(payload && payload.recentResults) || (payload && payload.featuredMatch && payload.featuredMatch.isLive));
-        if (live) LiveEngine.start();
+        LiveEngine.refresh();
+    }
+
+    function liveOverlaySource() {
+        const engineLast = typeof LiveEngine !== 'undefined' && LiveEngine.getLastMatches
+            ? LiveEngine.getLastMatches()
+            : null;
+        return overlayMatchesForHub(engineLast, flatMatches);
     }
 
     function stopHubPoll() {
@@ -591,10 +646,10 @@ document.addEventListener('DOMContentLoaded', () => {
             currentTournamentKey  = data.tournament.key || null;
             currentTournamentName = data.tournament.name || '';
 
-            const merged = sortFlatMatches(mergeHubMatches(data));
+            const merged = sortFlatMatches(mergeLiveOverlay(mergeHubMatches(data), liveOverlaySource()));
             paintHeader(data.tournament, merged);
             renderFlatList(merged);
-            startLiveOverlayIfNeeded(data);
+            ensureLiveEngine();
 
         } catch (err) {
             console.warn('Hub load failed:', err.message);
