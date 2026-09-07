@@ -1,22 +1,27 @@
 // ===================================
 // TennisWorld — Live Score Engine
 // ===================================
-// Polls GET /api/livescore (anonymous — no Bearer) while any match isLive.
+// Polls GET /api/livescore (anonymous — no Bearer).
 // Tour-aware (ATP|WTA allowlist). Floor 15s; backoff 15 → 30 → 60 on errors.
+// Idle-stops only after EMPTY_IDLE_STREAK consecutive polls with no live
+// rows — a single empty response must not kill the overlay. Scores calls
+// refresh() on hub reload so newly InPlay matches resume without remount.
 // Pauses when document.hidden; one refresh on visibilitychange → visible.
-// Does not poll when idle.
 
 const LiveEngine = (() => {
-    const POLL_MIN     = 15_000;
-    const POLL_LIVE    = 15_000;
-    const BACKOFF_CAP  = 60_000;
+    const POLL_MIN           = 15_000;
+    const POLL_LIVE          = 15_000;
+    const BACKOFF_CAP        = 60_000;
+    const EMPTY_IDLE_STREAK  = 4;
 
-    let timerId     = null;
-    let inFlight    = false;
-    let backoffMs   = POLL_MIN;
-    let lastMatches = null;
-    let running     = false;
-    let tour        = (typeof resolveTour === 'function' ? resolveTour() : 'ATP');
+    let timerId      = null;
+    let inFlight     = false;
+    let backoffMs    = POLL_MIN;
+    let lastMatches  = null;
+    let lastLiveList = null;
+    let emptyStreak  = 0;
+    let running      = false;
+    let tour         = (typeof resolveTour === 'function' ? resolveTour() : 'ATP');
 
     function currentTour() {
         const allowed = typeof parseTour === 'function' ? parseTour(tour) : null;
@@ -63,19 +68,29 @@ const LiveEngine = (() => {
             const list = Array.isArray(data) ? data : [];
             const hasLive = list.some(m => m && m.isLive);
 
+            if (hasLive) {
+                emptyStreak = 0;
+                lastLiveList = list;
+            } else {
+                emptyStreak += 1;
+                if (emptyStreak >= EMPTY_IDLE_STREAK) lastLiveList = [];
+            }
+
             const serialized = JSON.stringify(data);
             if (serialized !== lastMatches) {
                 lastMatches = serialized;
                 publish(list);
             }
 
-            publishStatus(hasLive ? 'connected' : 'idle');
+            const overlayLive = Array.isArray(lastLiveList) && lastLiveList.some(m => m && m.isLive);
+            publishStatus(hasLive || overlayLive ? 'connected' : 'idle');
 
-            if (hasLive && !document.hidden && running) {
+            const keepPolling = running && !document.hidden && (hasLive || emptyStreak < EMPTY_IDLE_STREAK);
+            if (keepPolling) {
                 schedule(POLL_LIVE);
             } else {
                 clearTimer();
-                running = hasLive ? running : false;
+                if (!hasLive) running = false;
             }
         } catch (err) {
             console.warn('[Live] Poll failed:', err.message);
@@ -90,6 +105,7 @@ const LiveEngine = (() => {
     return {
         start() {
             running = true;
+            emptyStreak = 0;
             if (timerId || inFlight) return;
             poll();
         },
@@ -102,6 +118,7 @@ const LiveEngine = (() => {
         refresh() {
             if (document.hidden) return;
             running = true;
+            emptyStreak = 0;
             clearTimer();
             poll();
         },
@@ -112,6 +129,8 @@ const LiveEngine = (() => {
             if (t === tour) return;
             tour = t;
             lastMatches = null;
+            lastLiveList = null;
+            emptyStreak = 0;
             if (running && !document.hidden) {
                 clearTimer();
                 poll();
@@ -120,6 +139,12 @@ const LiveEngine = (() => {
 
         getTour() {
             return currentTour();
+        },
+
+        // Last livescore list that still had live rows, or [] after a
+        // confirmed empty streak. null until the first successful poll.
+        getLastMatches() {
+            return lastLiveList;
         },
     };
 })();
