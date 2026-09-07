@@ -110,7 +110,7 @@ TW.MatchCard = function MatchCard(m, tournamentName) {
         : '';
 
     // Set column headers (only show if there are scores)
-    const setCount  = (m.setScores && m.setScores.length) || (status === 'upcoming' ? 0 : 1);
+    const setCount  = (m.setScores && m.setScores.length) || (status === 'upcoming' || status === 'delayed' ? 0 : 1);
     const setLabels = setCount > 0
         ? Array.from({ length: setCount }, function (_, i) {
             return '<span class="hub-set hub-set-label">S' + (i + 1) + '</span>';
