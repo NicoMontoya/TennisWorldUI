@@ -46,6 +46,16 @@ window.TW = window.TW || {};
         return a.includes(k) || k.includes(a);
     }
 
+    function isFinishedStatus(status) {
+        const s = String(status == null ? '' : status).trim().toLowerCase();
+        return s === 'finished' || s === 'ended' || s === 'retired' || s === 'walkover';
+    }
+
+    function isDelayedStatus(status) {
+        const s = String(status == null ? '' : status).trim().toLowerCase();
+        return s === 'delayed' || s === 'postponed' || s === 'suspended';
+    }
+
     // Given the 64-pair bracketSlots array, find which pair index this API match
     // belongs to (returns -1 if not found)
     function findPairIndex(pairs, name1, name2) {
@@ -179,7 +189,7 @@ window.TW = window.TW || {};
         for (const rid of roundIds) {
             const idx = RID_TO_IDX[rid];
             const hasActivity = (byRound[rid] || []).some(
-                m => m.status === 'Finished' || m.isLive
+                m => isFinishedStatus(m.status) || isDelayedStatus(m.status) || m.isLive
             );
             if (hasActivity && idx > highestIdx) {
                 highestIdx    = idx;
@@ -341,16 +351,18 @@ window.TW = window.TW || {};
         if (m.player2Key)          el.dataset.p2Key    = m.player2Key;
         const p1Won  = m.winner === 'player1';
         const p2Won  = m.winner === 'player2';
-        const isDone = m.status === 'Finished';
+        const isDone = isFinishedStatus(m.status);
         const isLive = m.isLive;
+        const isDelayed = !isLive && !isDone && isDelayedStatus(m.status);
         const isInf  = slot.type === 'inferred';
         const isChamp = isDone && slot.match.roundId === 12; // champion
 
         let cls = 'db-card';
-        if (isDone)  cls += ' db-card-done';
-        if (isLive)  cls += ' db-card-live';
-        if (isInf)   cls += ' db-card-inferred';
-        if (isChamp) cls += ' db-card-champ';
+        if (isDone)    cls += ' db-card-done';
+        if (isLive)    cls += ' db-card-live';
+        if (isDelayed) cls += ' db-card-delayed';
+        if (isInf)     cls += ' db-card-inferred';
+        if (isChamp)   cls += ' db-card-champ';
         el.className = cls;
 
         // Parse per-player set scores: first number = p1's games, second = p2's.

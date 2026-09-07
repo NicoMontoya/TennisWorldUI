@@ -55,9 +55,15 @@ TW.VisualBracket = (function () {
         return s === 'finished' || s === 'ended' || s === 'retired' || s === 'walkover';
     }
 
+    function isDelayedStatus(status) {
+        const s = String(status == null ? '' : status).trim().toLowerCase();
+        return s === 'delayed' || s === 'postponed' || s === 'suspended';
+    }
+
     function matchStatus(m) {
         if (m.isLive || m.status === '1') return 'live';
         if (isFinishedStatus(m.status))   return 'finished';
+        if (isDelayedStatus(m.status))    return 'delayed';
         if (String(m.status || '').trim().toLowerCase() === 'cancelled') return 'cancelled';
         return 'upcoming';
     }

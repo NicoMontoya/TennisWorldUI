@@ -20,9 +20,15 @@ TW.MatchCard = function MatchCard(m, tournamentName) {
         return s === 'finished' || s === 'ended' || s === 'retired' || s === 'walkover';
     }
 
+    function isDelayedStatus(status) {
+        const s = String(status == null ? '' : status).trim().toLowerCase();
+        return s === 'delayed' || s === 'postponed' || s === 'suspended';
+    }
+
     function statusType(match) {
         if (match.isLive || match.status === '1') return 'live';
         if (isFinishedStatus(match.status))       return 'finished';
+        if (isDelayedStatus(match.status))        return 'delayed';
         if (String(match.status || '').trim().toLowerCase() === 'cancelled') return 'cancelled';
         return 'upcoming';
     }
@@ -94,6 +100,8 @@ TW.MatchCard = function MatchCard(m, tournamentName) {
         ? '<div class="hub-live-pill">● Live</div>'
         : status === 'finished'
         ? '<div class="hub-live-pill" style="color:var(--text-secondary)">Finished</div>'
+        : status === 'delayed'
+        ? '<div class="hub-live-pill" style="color:var(--text-secondary)">Delayed</div>'
         : '<div class="hub-live-pill" style="color:var(--text-muted)">Upcoming · ' + esc(formatMatchDate(m)) + '</div>';
 
     // Live point score

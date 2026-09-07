@@ -11,6 +11,7 @@
 // textContent/dataset only; no CDN on this page; PUBLIC_GET intact;
 // parseTour allowlist; Peak Overlap fully removed.
 // Finished paint: Finished / Ended / Retired / Walkover (any case).
+// Delayed paint: Delayed / Postponed / Suspended (any case) — not Upcoming.
 // mergeLiveOverlay also promotes those terminal livescore rows onto hub.
 
 function matchKeyOf(m) {
@@ -24,10 +25,25 @@ function isFinishedStatus(status) {
     return s === 'finished' || s === 'ended' || s === 'retired' || s === 'walkover';
 }
 
+// Interrupted / not-started-yet-but-not-upcoming: Delayed / Postponed / Suspended.
+function isDelayedStatus(status) {
+    const s = String(status == null ? '' : status).trim().toLowerCase();
+    return s === 'delayed' || s === 'postponed' || s === 'suspended';
+}
+
 function matchPhase(m) {
     if (m && m.isLive) return 'live';
     if (m && isFinishedStatus(m.status)) return 'finished';
+    if (m && isDelayedStatus(m.status)) return 'delayed';
     return 'upcoming';
+}
+
+function phaseLabel(m) {
+    const phase = matchPhase(m);
+    if (phase === 'live') return 'Live';
+    if (phase === 'upcoming') return 'Upcoming';
+    if (phase === 'delayed') return 'Delayed';
+    return 'Finished';
 }
 
 function pairRoundKey(m) {
@@ -133,6 +149,17 @@ function mergeLiveOverlay(hubMatches, liveMatches) {
             if (live.winner != null && live.winner !== '') next.winner = live.winner;
             return next;
         }
+        // Promote Delayed / Postponed / Suspended onto a Not Started hub row.
+        // Copy scores only when livescore actually has them — never invent.
+        if (isDelayedStatus(live.status)) {
+            const next = Object.assign({}, hub, {
+                isLive: false,
+                status: live.status,
+            });
+            if (live.setScores && live.setScores.length) next.setScores = live.setScores;
+            if (live.currentGame != null) next.currentGame = live.currentGame;
+            return next;
+        }
         if (live.setScores && live.setScores.length && (!hub.setScores || !hub.setScores.length)) {
             return Object.assign({}, hub, { setScores: live.setScores, isLive: false });
         }
@@ -148,6 +175,7 @@ function overlayMatchesForHub(engineLast, paintedMatches) {
             || (m.setScores && m.setScores.length)
             || m.currentGame
             || isFinishedStatus(m.status)
+            || isDelayedStatus(m.status)
         ));
     }
     return [];
@@ -157,12 +185,12 @@ function sortFlatMatches(matches) {
     return (matches || []).slice().sort((a, b) => {
         const pa = matchPhase(a);
         const pb = matchPhase(b);
-        const order = { live: 0, upcoming: 1, finished: 2 };
+        const order = { live: 0, delayed: 1, upcoming: 2, finished: 3 };
         const d = (order[pa] ?? 9) - (order[pb] ?? 9);
         if (d !== 0) return d;
         const ta = matchTimeMs(a);
         const tb = matchTimeMs(b);
-        if (pa === 'upcoming') {
+        if (pa === 'upcoming' || pa === 'delayed') {
             if (!isNaN(ta) && !isNaN(tb) && ta !== tb) return ta - tb;
             if (!isNaN(ta) && isNaN(tb)) return -1;
             if (isNaN(ta) && !isNaN(tb)) return 1;
@@ -472,7 +500,7 @@ document.addEventListener('DOMContentLoaded', () => {
         badge.className = 'smr-badge smr-badge-' + phase;
         const label = badge.querySelector('.smr-badge-label');
         if (label) {
-            label.textContent = phase === 'live' ? 'Live' : phase === 'upcoming' ? 'Upcoming' : 'Finished';
+            label.textContent = phaseLabel(m);
         }
         badge.hidden = false;
     }
@@ -489,7 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const phase = matchPhase(m);
         const isLive = phase === 'live';
         const isDone = phase === 'finished';
-        row.classList.remove('smr-live', 'smr-upcoming', 'smr-finished', 'smr-is-live', 'smr-is-done');
+        row.classList.remove('smr-live', 'smr-upcoming', 'smr-delayed', 'smr-finished', 'smr-is-live', 'smr-is-done');
         row.classList.add('smr', 'smr-' + phase);
         row.classList.toggle('smr-is-live', isLive);
         row.classList.toggle('smr-is-done', isDone);
@@ -544,7 +572,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isLive = phase === 'live';
         const isDone = phase === 'finished';
 
-        row.classList.remove('smr-live', 'smr-upcoming', 'smr-finished', 'smr-is-live', 'smr-is-done');
+        row.classList.remove('smr-live', 'smr-upcoming', 'smr-delayed', 'smr-finished', 'smr-is-live', 'smr-is-done');
         row.classList.add('smr', 'smr-' + phase);
         row.classList.toggle('smr-is-live', isLive);
         row.classList.toggle('smr-is-done', isDone);
@@ -555,7 +583,7 @@ document.addEventListener('DOMContentLoaded', () => {
             badge.hidden = false;
         }
         if (label) {
-            label.textContent = isLive ? 'Live' : isDone ? 'Finished' : 'Upcoming';
+            label.textContent = phaseLabel(live);
         }
 
         const nextSets = scoreText(live);

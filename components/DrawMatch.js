@@ -15,9 +15,15 @@ TW.DrawMatch = function DrawMatch(m) {
         return s === 'finished' || s === 'ended' || s === 'retired' || s === 'walkover';
     }
 
+    function isDelayedStatus(status) {
+        const s = String(status == null ? '' : status).trim().toLowerCase();
+        return s === 'delayed' || s === 'postponed' || s === 'suspended';
+    }
+
     function statusType(match) {
         if (match.isLive || match.status === '1') return 'live';
         if (isFinishedStatus(match.status))       return 'finished';
+        if (isDelayedStatus(match.status))        return 'delayed';
         if (String(match.status || '').trim().toLowerCase() === 'cancelled') return 'cancelled';
         return 'upcoming';
     }
@@ -57,6 +63,8 @@ TW.DrawMatch = function DrawMatch(m) {
         score = '<span class="draw-live">● ' + setStr + pts + '</span>';
     } else if (status === 'cancelled') {
         score = '—';
+    } else if (status === 'delayed') {
+        score = 'Delayed';
     } else {
         score = m.time || 'TBD';
     }

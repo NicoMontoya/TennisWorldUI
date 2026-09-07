@@ -3849,6 +3849,10 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
 }
 
 .vb-s-upcoming { opacity: 0.62; }
+.vb-s-delayed {
+    border-left: 3px solid #e8b84a;
+    opacity: 0.92;
+}
 .vb-s-cancelled { opacity: 0.32; }
 
 /* Champion match (Final winner determined): gold glow */
@@ -5559,6 +5563,11 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     animation: tmr-pulse 1.8s ease-in-out infinite;
 }
 
+.draw-badge-delayed {
+    color: #8a5a10;
+    background: color-mix(in srgb, #e8b84a 22%, transparent);
+}
+
 @media (max-width: 560px) {
     .draw-row-flat { grid-template-columns: 1fr auto 1fr; padding: 0.5rem 0.25rem; }
     .draw-pname    { font-size: 0.8rem; }
@@ -5849,6 +5858,10 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     border-color: var(--clay);
     border-left-width: 3px;
     background: color-mix(in srgb, var(--clay) 4%, var(--bg-card));
+}
+
+.db-card-delayed {
+    border-left: 3px solid #e8b84a;
 }
 
 /* Inferred / propagated winner not yet confirmed by API */
@@ -7321,6 +7334,11 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     padding-left: 0;
 }
 
+.smr-badge-delayed {
+    color: #8a5a10;
+    background: color-mix(in srgb, #e8b84a 28%, transparent);
+}
+
 .smr-badge-finished {
     color: var(--text-muted);
     background: transparent;
@@ -7473,6 +7491,12 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
 [data-theme="dark"] .smr-badge-live {
     background: var(--accent-live);
     color: var(--accent-live-ink);
+}
+
+[data-theme="dark"] .smr-badge-delayed,
+[data-theme="dark"] .draw-badge-delayed {
+    color: #f0c96a;
+    background: color-mix(in srgb, #e8b84a 18%, transparent);
 }
 
 [data-theme="dark"] .smr-dot {
