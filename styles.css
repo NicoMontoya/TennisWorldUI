@@ -6578,6 +6578,8 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     font-style: italic;
 }
 
+.chart-empty[hidden] { display: none; }
+
 /* ── Recent form ─────────────────────────────────────────────────────────── */
 .player-form-wrap { }
 
@@ -7083,6 +7085,9 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
 
 /* ── Historical rankings (Time Machine) ──────────────────────────────────── */
 .ranking-mode-toggle { display: inline-flex; gap: 2px; background: color-mix(in srgb, var(--text-muted) 14%, transparent); border-radius: 8px; padding: 2px; margin-right: 0.6rem; }
+.ranking-mode-toggle[hidden] { display: none; }
+.hist-player { color: inherit; text-decoration: none; }
+.hist-player:hover { color: var(--accent); }
 .ranking-mode-toggle .mode-btn {
     border: none; background: transparent; color: var(--text-secondary);
     font-size: 0.8rem; font-weight: 600; padding: 0.35rem 0.7rem; border-radius: 6px; cursor: pointer;

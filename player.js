@@ -39,11 +39,13 @@
     // ── Data loading ──────────────────────────────────────────────────────────
 
     async function loadPlayer() {
+        const qsPlayer = encodeURIComponent(playerKey);
+        const qsTour   = encodeURIComponent(tour);
         const [profileResult, statsResult, historyResult, rankHistResult] = await Promise.allSettled([
-            apiFetch(`/api/players?playerKey=${playerKey}&tour=${tour}`),
-            apiFetch(`/api/player-stats?tour=${tour}&playerKey=${playerKey}`),
-            apiFetch(`/api/player-history?tour=${tour}&playerKey=${playerKey}`),
-            apiFetch(`/api/player-ranking-history?tour=${tour}&playerKey=${playerKey}`),
+            apiFetch(`/api/players?playerKey=${qsPlayer}&tour=${qsTour}`),
+            apiFetch(`/api/player-stats?tour=${qsTour}&playerKey=${qsPlayer}`),
+            apiFetch(`/api/player-history?tour=${qsTour}&playerKey=${qsPlayer}`),
+            apiFetch(`/api/player-ranking-history?tour=${qsTour}&playerKey=${qsPlayer}`),
         ]);
 
         const profile     = profileResult.status  === 'fulfilled' ? profileResult.value   : null;
@@ -51,7 +53,9 @@
         const history     = historyResult.status  === 'fulfilled' ? historyResult.value   : null;
         const rankHistory = rankHistResult.status === 'fulfilled' ? rankHistResult.value  : null;
 
-        if (!profile && !stats && !history) {
+        // Legend / Sackmann keys (s…) often have ranking history in KV but no
+        // RapidAPI profile/stats. URL identity is enough to render the hero.
+        if (!profile && !stats && !history && !rankHistory && !urlName) {
             showPageError('Could not load player data. <a href="rankings.html">Browse rankings →</a>');
             return;
         }
@@ -240,22 +244,39 @@
     }
 
     // ── Ranking history line chart ────────────────────────────────────────────
+    // /api/player-ranking-history → { history: [{ date, rank }] }. Empty KV
+    // yields [] — show a clear empty state, never invent points.
+
+    function rankingHistoryPoints(rankHistory) {
+        const raw = rankHistory && Array.isArray(rankHistory.history)
+            ? rankHistory.history
+            : [];
+        return raw.filter(e => e && e.date && Number(e.rank) > 0)
+            .map(e => ({ date: e.date, rank: Number(e.rank) }))
+            .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    }
 
     function renderRankingChart(rankHistory) {
         const loadingEl = document.getElementById('rankingChartLoading');
         const canvasEl  = document.getElementById('rankingChart');
         const emptyEl   = document.getElementById('rankingChartEmpty');
 
-        loadingEl.style.display = 'none';
+        if (loadingEl) loadingEl.style.display = 'none';
 
-        const points = (rankHistory?.history || []).filter(e => e.rank > 0);
+        const points = rankingHistoryPoints(rankHistory);
 
         if (points.length < 2) {
-            emptyEl.style.display = 'block';
+            if (rankingChart) { rankingChart.destroy(); rankingChart = null; }
+            if (canvasEl) canvasEl.style.display = 'none';
+            if (emptyEl) {
+                emptyEl.textContent = 'No ranking history available';
+                emptyEl.style.display = 'block';
+            }
             return;
         }
 
-        canvasEl.style.display = 'block';
+        if (emptyEl) emptyEl.style.display = 'none';
+        if (canvasEl) canvasEl.style.display = 'block';
 
         const style     = getComputedStyle(document.documentElement);
         const accent    = style.getPropertyValue('--accent').trim()      || '#c9e94e';
@@ -329,9 +350,13 @@
             },
         });
 
-        document.getElementById('themeToggle')?.addEventListener('click', () => {
-            setTimeout(() => renderRankingChart(rankHistory), 250);
-        });
+        if (!window._twRankChartThemeBound) {
+            window._twRankChartThemeBound = true;
+            document.getElementById('themeToggle')?.addEventListener('click', () => {
+                setTimeout(() => renderRankingChart(window._twRankHistory), 250);
+            });
+        }
+        window._twRankHistory = rankHistory;
     }
 
     // ── Career table ──────────────────────────────────────────────────────────
@@ -417,14 +442,28 @@
     async function fetchStandings() {
         if (standingsCache) return;
         try {
-            const [atp, wta] = await Promise.allSettled([
+            // Active ATP + retired legends (s+SackmannId). WTA standings stay
+            // available for mixed H2H; legend backfill is ATP-only.
+            const [atp, wta, vAtp] = await Promise.allSettled([
                 apiFetch('/api/standings?tour=ATP'),
                 apiFetch('/api/standings?tour=WTA'),
+                apiFetch('/api/vintage-roster?tour=ATP'),
             ]);
-            standingsCache = [
-                ...(atp.status === 'fulfilled' ? atp.value : []).map(p => ({ ...p, tour: 'ATP' })),
-                ...(wta.status === 'fulfilled' ? wta.value : []).map(p => ({ ...p, tour: 'WTA' })),
-            ].filter(p => String(p.playerKey) !== String(playerKey));
+            const list = [];
+            const seen = new Set();
+            const add = (p) => {
+                const k = String(p.playerKey || '');
+                if (!p.name || !k || seen.has(k) || k === String(playerKey)) return;
+                seen.add(k);
+                list.push(p);
+            };
+            if (atp.status === 'fulfilled') (atp.value || []).forEach(p => add({ ...p, tour: 'ATP' }));
+            if (wta.status === 'fulfilled') (wta.value || []).forEach(p => add({ ...p, tour: 'WTA' }));
+            const legends = ((vAtp.status === 'fulfilled' && vAtp.value && vAtp.value.roster) || [])
+                .filter(r => r.legend)
+                .map(r => ({ playerKey: r.id, name: r.name, country: r.countryAcr, rank: r.position, tour: 'ATP', legend: true }));
+            legends.forEach(add);
+            standingsCache = list;
         } catch (_) { standingsCache = []; }
         // Re-filter with whatever the user typed while the list was loading —
         // otherwise a fast typist sees an empty dropdown until the next keystroke.
@@ -446,7 +485,7 @@
                  data-key="${p.playerKey}" data-name="${p.name}" data-tour="${p.tour}">
                 <span class="h2h-drop-flag">${flag(p.country)}</span>
                 <span class="h2h-drop-name">${p.name}</span>
-                <span class="h2h-drop-rank">#${p.rank}</span>
+                <span class="h2h-drop-rank">${p.legend ? 'Legend' : '#' + p.rank}</span>
              </li>`
         ).join('');
         dropdown.style.display = 'block';
@@ -471,7 +510,7 @@
         resultsEl.innerHTML = skeletonHTML(4);
 
         try {
-            const data = await apiFetch(`/api/h2h?playerKeyA=${keyA}&playerKeyB=${keyB}&tour=${h2hTour}`);
+            const data = await apiFetch(`/api/h2h?playerKeyA=${encodeURIComponent(keyA)}&playerKeyB=${encodeURIComponent(keyB)}&tour=${encodeURIComponent(h2hTour)}`);
             renderH2HResults(data);
         } catch (err) {
             resultsEl.innerHTML = errorCardHTML('Could not load H2H data');
