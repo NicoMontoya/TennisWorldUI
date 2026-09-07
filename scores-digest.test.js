@@ -26,9 +26,12 @@ function extractFn(src, name) {
 }
 
 function loadScoresHelpers() {
-    const names = ['matchKeyOf', 'matchPhase', 'matchTimeMs', 'mergeHubMatches', 'sortFlatMatches'];
+    const names = [
+        'matchKeyOf', 'matchPhase', 'matchTimeMs', 'mergeHubMatches', 'sortFlatMatches',
+        'liveByKeyFrom', 'mergeLiveOverlay', 'overlayMatchesForHub',
+    ];
     const body = names.map(n => extractFn(scoresSrc, n)).join('\n');
-    return new Function(body + '; return { matchKeyOf, matchPhase, matchTimeMs, mergeHubMatches, sortFlatMatches };')();
+    return new Function(body + '; return { matchKeyOf, matchPhase, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, mergeLiveOverlay, overlayMatchesForHub };')();
 }
 
 describe('TW Security acceptance checklist', () => {
@@ -229,6 +232,70 @@ describe('LiveEngine tour + idle contract', () => {
         expect(liveSrc).toMatch(/POLL_LIVE\s*=\s*15_000/);
         expect(liveSrc).toMatch(/document\.hidden/);
         expect(liveSrc).toMatch(/auth:\s*false/);
+    });
+
+    it('idle-stops only after several empty polls and exposes last live list', () => {
+        expect(liveSrc).toMatch(/EMPTY_IDLE_STREAK\s*=\s*4/);
+        expect(liveSrc).toMatch(/emptyStreak/);
+        expect(liveSrc).toMatch(/getLastMatches\(/);
+        expect(liveSrc).toMatch(/emptyStreak < EMPTY_IDLE_STREAK/);
+        expect(liveSrc).not.toMatch(/running = hasLive \? running : false/);
+    });
+});
+
+describe('hub reload preserves live overlay', () => {
+    const { mergeLiveOverlay, overlayMatchesForHub, sortFlatMatches, matchPhase } = loadScoresHelpers();
+
+    it('keeps isLive, setScores, currentGame, and status over hub Not Started', () => {
+        const hub = [
+            { matchKey: 'live-1', player1Name: 'A', player2Name: 'B', status: 'Not Started' },
+            { matchKey: 'up-1', player1Name: 'C', player2Name: 'D', status: 'Not Started' },
+        ];
+        const live = [
+            {
+                matchKey: 'live-1',
+                isLive: true,
+                status: 'InPlay',
+                setScores: [{ p1: 6, p2: 4 }, { p1: 3, p2: 2 }],
+                currentGame: '30 - 15',
+            },
+        ];
+        const merged = mergeLiveOverlay(hub, live);
+        const byKey = Object.fromEntries(merged.map(m => [m.matchKey, m]));
+        expect(byKey['live-1'].isLive).toBe(true);
+        expect(byKey['live-1'].status).toBe('InPlay');
+        expect(byKey['live-1'].setScores).toEqual([{ p1: 6, p2: 4 }, { p1: 3, p2: 2 }]);
+        expect(byKey['live-1'].currentGame).toBe('30 - 15');
+        expect(byKey['live-1'].player1Name).toBe('A');
+        expect(byKey['up-1'].isLive).toBeFalsy();
+        expect(matchPhase(sortFlatMatches(merged)[0])).toBe('live');
+    });
+
+    it('does not clobber a Finished hub row with a non-live overlay', () => {
+        const hub = [{ matchKey: 'done', status: 'Finished', setScores: [{ p1: 6, p2: 3 }] }];
+        const live = [{ matchKey: 'done', isLive: false, status: 'Finished', setScores: [{ p1: 1, p2: 0 }] }];
+        const [row] = mergeLiveOverlay(hub, live);
+        expect(row.isLive).toBe(false);
+        expect(row.status).toBe('Finished');
+        expect(row.setScores).toEqual([{ p1: 6, p2: 3 }]);
+    });
+
+    it('uses painted live rows when the engine has not polled yet', () => {
+        const painted = [{ matchKey: 'live-1', isLive: true, currentGame: '15 - 0' }];
+        expect(overlayMatchesForHub(null, painted)).toEqual(painted);
+        expect(overlayMatchesForHub(undefined, painted)).toEqual(painted);
+        expect(overlayMatchesForHub([], painted)).toEqual([]);
+        expect(overlayMatchesForHub([{ matchKey: 'live-1', isLive: true }], painted)[0].matchKey).toBe('live-1');
+    });
+});
+
+describe('Scores always starts LiveEngine', () => {
+    it('refreshes LiveEngine on hub load without gating on hub isLive', () => {
+        expect(scoresSrc).toMatch(/function ensureLiveEngine\(/);
+        expect(scoresSrc).toMatch(/LiveEngine\.refresh\(\)/);
+        expect(scoresSrc).toMatch(/mergeLiveOverlay\(mergeHubMatches\(data\), liveOverlaySource\(\)\)/);
+        expect(scoresSrc).not.toMatch(/startLiveOverlayIfNeeded/);
+        expect(scoresSrc).not.toMatch(/if \(live\) LiveEngine\.start/);
     });
 });
 
