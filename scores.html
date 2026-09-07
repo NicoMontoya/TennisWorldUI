@@ -16,7 +16,7 @@
     <meta name="twitter:title"       content="TennisWorld — Scores">
     <meta name="twitter:description" content="Live tennis scores and recent results. ATP and WTA updates throughout the day.">
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=tw39">
+    <link rel="stylesheet" href="styles.css?v=tw40">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e14">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -85,10 +85,11 @@
                     <button type="button" class="tour-btn" data-tour="ATP" aria-pressed="true">ATP</button>
                     <button type="button" class="tour-btn" data-tour="WTA" aria-pressed="false">WTA</button>
                 </div>
+                <div class="category-tabs" id="categoryTabs" role="tablist" aria-label="Match category"></div>
                 <div class="digest-chips" id="digestChips" role="tablist" aria-label="Match filter">
                     <button type="button" class="digest-chip" data-filter="live" aria-pressed="false">Live <span class="digest-chip-count" data-count-for="live">0</span></button>
+                    <button type="button" class="digest-chip" data-filter="completed" aria-pressed="false">Completed</button>
                     <button type="button" class="digest-chip" data-filter="upcoming" aria-pressed="false">Upcoming</button>
-                    <button type="button" class="digest-chip" data-filter="finished" aria-pressed="false">Finished</button>
                     <button type="button" class="digest-chip is-active" data-filter="all" aria-pressed="true">All</button>
                 </div>
                 <div class="digest-status">
@@ -98,10 +99,11 @@
             </div>
 
             <section class="scores-list-section" id="scoresSection">
-                <div class="scores-list" id="scoresList" aria-live="polite" aria-label="Match scores">
+                <div class="scores-grid" id="scoresList" aria-live="polite" aria-label="Match scores">
                     <div class="digest-loading">Loading match data…</div>
                 </div>
             </section>
+            <p class="scores-tz-note" id="scoresTzNote">Match times shown in UTC.</p>
         </div>
     </section>
 
