@@ -2,8 +2,9 @@
 // TennisWorld — Home / Vintage Curves
 // ===================================
 // Cumulative career metric vs age ("years old"), one curve per player.
-// Data: /api/vintage-roster (top-100 picker roster) and
-//       /api/player-vintage?playerKey=N → { player, points: [{age,w,m}], totals }.
+// Data: /api/vintage-roster (top-100 + ATP legends) and
+//       /api/player-vintage?playerKey=N|s{SackmannId}
+//       → { player, points: [{age,w,m}], totals }. Legends use 's'-prefixed keys.
 // Metric toggle re-maps the already-fetched points — no refetch.
 // Selection persists in localStorage (tw-vintage-players); colors follow the
 // player (slot stored with selection), never their position in the list.
@@ -44,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
         note:    document.getElementById('vintageNote'),
         sub:     document.getElementById('vintageSub'),
         chartWrap: document.getElementById('vintageChartWrap'),
+        empty:   document.getElementById('vintageEmpty'),
     };
 
     // ── Theme-aware chart chrome ──────────────────────────────────────────────
@@ -91,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
         while (inFlight < MAX_CONCURRENT && queue.length) {
             const id = queue.shift();
             inFlight++;
-            apiFetch(`/api/player-vintage?tour=${TOUR}&playerKey=${id}`)
+            apiFetch(`/api/player-vintage?tour=${encodeURIComponent(TOUR)}&playerKey=${encodeURIComponent(id)}`)
                 .then(data => { curves.set(id, data); })
                 .catch(()  => { curves.set(id, { error: 'fetch-failed' }); })
                 .finally(() => {
@@ -176,10 +178,33 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function emptyMessage() {
+        if (!roster.length) return 'No vintage roster available.';
+        if (!selection.length) return 'Add a player to compare careers.';
+        const unresolved = selection.filter(p => {
+            const cv = curves.get(p.id);
+            return cv && (cv.error || !cv.points?.length);
+        });
+        if (unresolved.length && unresolved.length === selection.length) {
+            if (unresolved.every(p => curves.get(p.id)?.error === 'not-loaded')) {
+                return 'Legend career curves are not loaded yet.';
+            }
+            return 'No career curves available.';
+        }
+        return 'No career curves available.';
+    }
+
+    function setEmpty(msg) {
+        if (!els.empty) return;
+        els.empty.textContent = msg || '';
+        els.empty.hidden = !msg;
+    }
+
     function syncChart() {
         const datasets = buildDatasets();
         const anyLoading = selection.some(p => !curves.has(p.id));
         if (els.loading) els.loading.style.display = (datasets.length === 0 && anyLoading) ? '' : 'none';
+        setEmpty((datasets.length === 0 && !anyLoading) ? emptyMessage() : '');
 
         if (els.canvas && typeof Chart !== 'undefined') {
             if (!chart) {
@@ -238,9 +263,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return cv && (cv.error === 'no-birthday' || (cv.error === undefined && !cv.points?.length));
         });
         const failed = selection.filter(p => curves.get(p.id)?.error === 'fetch-failed');
+        const notLoaded = selection.filter(p => curves.get(p.id)?.error === 'not-loaded');
         const parts = [];
         if (skipped.length) parts.push(`No birthdate data for ${skipped.map(p => p.name).join(', ')} — skipped.`);
         if (failed.length)  parts.push(`Couldn't load ${failed.map(p => p.name).join(', ')}.`);
+        if (notLoaded.length) parts.push(`Career curve not loaded for ${notLoaded.map(p => p.name).join(', ')}.`);
         if (els.note) els.note.textContent = parts.join(' ');
     }
 
@@ -300,10 +327,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Init ──────────────────────────────────────────────────────────────────
     (async () => {
         try {
-            const data = await apiFetch(`/api/vintage-roster?tour=${TOUR}`);
+            const data = await apiFetch(`/api/vintage-roster?tour=${encodeURIComponent(TOUR)}`);
             roster = data.roster || [];
         } catch {
             if (els.loading) els.loading.textContent = 'Could not load the player roster — is the API running?';
+            setEmpty('');
+            return;
+        }
+
+        if (!roster.length) {
+            if (els.loading) {
+                els.loading.textContent = 'No vintage roster available.';
+                els.loading.style.display = '';
+            }
+            setEmpty('');
             return;
         }
 

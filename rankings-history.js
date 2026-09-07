@@ -34,6 +34,22 @@
     let META = null;          // { min, max, dates:[…] }
     let currentDate = null;   // requested date (YYYY-MM-DD)
     let allRows = [];         // current snapshot rankings (for search filter)
+    let historical = false;
+
+    // Time Machine rows carry Sackmann pid (not RapidAPI keys). Profile
+    // ranking-history / vintage / H2H resolve legends via 's'+pid.
+    function sackmannPlayerKey(row) {
+        if (!row) return '';
+        if (row.playerKey) return String(row.playerKey);
+        const pid = row.pid != null ? String(row.pid).trim() : '';
+        if (!pid) return '';
+        return pid.charAt(0) === 's' ? pid : 's' + pid;
+    }
+
+    function liveTour() {
+        const wta = document.querySelector('.tab-btn[data-tab="wta"]');
+        return wta && wta.classList.contains('active') ? 'WTA' : 'ATP';
+    }
 
     function fmtLong(iso) {
         if (!iso) return '';
@@ -81,19 +97,46 @@
         const liveTable = document.getElementById('rankingsTable');
         const livePager = document.getElementById('rankingsPagination');
 
+        function setHistorical(on) {
+            historical = !!on;
+            toggle.querySelectorAll('.mode-btn').forEach(b => {
+                b.classList.toggle('active', (b.dataset.mode === 'historical') === historical);
+            });
+            if (liveTable) liveTable.hidden = historical;
+            if (livePager) livePager.style.display = historical ? 'none' : '';
+            panel.hidden = !historical;
+            const wtaBtn = document.querySelector('.tab-btn[data-tab="wta"]');
+            if (wtaBtn) wtaBtn.hidden = historical;
+            const sub = document.getElementById('rankingsSubtitle');
+            if (sub) {
+                sub.textContent = historical
+                    ? 'ATP · any week since 1973 · retired players included'
+                    : 'Overall · Live data';
+            }
+        }
+
+        function syncAtpOnlyChrome() {
+            const atp = liveTour() === 'ATP';
+            toggle.hidden = !atp;
+            if (!atp && historical) setHistorical(false);
+        }
+
         toggle.querySelectorAll('.mode-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
-                toggle.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                const historical = btn.dataset.mode === 'historical';
-                if (liveTable) liveTable.hidden = historical;
-                if (livePager) livePager.style.display = historical ? 'none' : '';
-                panel.hidden = !historical;
-                document.getElementById('rankingsSubtitle').textContent =
-                    historical ? 'Any week since 1973 · retired players included' : 'Overall · Live data';
+                const next = btn.dataset.mode === 'historical';
+                if (next && liveTour() !== 'ATP') return;
+                setHistorical(next);
                 if (historical && !META) await loadMeta();
             });
         });
+
+        document.querySelectorAll('.tab-btn').forEach(tab => {
+            tab.addEventListener('click', () => {
+                // rankings.js also binds this; run after its class toggle.
+                setTimeout(syncAtpOnlyChrome, 0);
+            });
+        });
+        syncAtpOnlyChrome();
 
         // Date input + prev/next
         panel.querySelector('#histDate').addEventListener('change', e => {
@@ -109,11 +152,19 @@
     }
 
     async function loadMeta() {
+        const body = document.getElementById('histBody');
         try {
             META = await apiFetch('/api/rankings-history?tour=ATP&meta=1');
         } catch (_) {
-            document.getElementById('histBody').innerHTML =
-                '<tr><td colspan="5" class="hist-msg">Historical rankings are not loaded yet.</td></tr>';
+            META = null;
+            if (body) body.innerHTML =
+                '<tr><td colspan="5" class="hist-msg">No historical rankings loaded yet.</td></tr>';
+            return;
+        }
+        if (!META || !Array.isArray(META.dates) || !META.dates.length || !META.min || !META.max) {
+            META = null;
+            if (body) body.innerHTML =
+                '<tr><td colspan="5" class="hist-msg">No historical rankings loaded yet.</td></tr>';
             return;
         }
         const input = document.getElementById('histDate');
@@ -144,7 +195,7 @@
 
     function step(dir) {
         // Move to prev/next available weekly snapshot relative to the current one.
-        if (!META) return;
+        if (!META || !Array.isArray(META.dates) || !META.dates.length) return;
         const cur = currentDate;
         const dates = META.dates;
         // find the snapshot currently shown (on/before cur), then ±1 in the list
@@ -161,14 +212,23 @@
         body.innerHTML = '<tr><td colspan="5" class="hist-msg">Loading…</td></tr>';
         let data;
         try {
-            data = await apiFetch(`/api/rankings-history?tour=ATP&date=${date}&limit=200`);
+            data = await apiFetch(`/api/rankings-history?tour=ATP&date=${encodeURIComponent(date)}&limit=200`);
         } catch (_) {
-            body.innerHTML = '<tr><td colspan="5" class="hist-msg">Could not load that week.</td></tr>';
+            allRows = [];
+            body.innerHTML = '<tr><td colspan="5" class="hist-msg">No rankings for this week.</td></tr>';
             return;
         }
-        allRows = data.rankings || [];
-        document.getElementById('histSnap').textContent =
-            `Week of ${fmtLong(data.date)}` + (data.date !== data.requestedDate ? ' (nearest)' : '');
+        allRows = Array.isArray(data.rankings) ? data.rankings : [];
+        const snap = document.getElementById('histSnap');
+        if (snap) {
+            snap.textContent = data.date
+                ? (`Week of ${fmtLong(data.date)}` + (data.date !== data.requestedDate ? ' (nearest)' : ''))
+                : '';
+        }
+        if (!allRows.length) {
+            body.innerHTML = '<tr><td colspan="5" class="hist-msg">No rankings for this week.</td></tr>';
+            return;
+        }
         const search = document.getElementById('playerSearch');
         renderRows(filterRows(search ? search.value : ''));
     }
@@ -181,15 +241,31 @@
 
     function renderRows(rows) {
         const body = document.getElementById('histBody');
-        if (!rows.length) { body.innerHTML = '<tr><td colspan="5" class="hist-msg">No players match.</td></tr>'; return; }
-        body.innerHTML = rows.map(r => `
-            <tr>
-                <td class="col-rank">${r.rank}</td>
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="5" class="hist-msg">' +
+                (allRows.length ? 'No players match.' : 'No rankings for this week.') +
+                '</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(r => {
+            const key = sackmannPlayerKey(r);
+            const qs = new URLSearchParams({ tour: 'ATP' });
+            if (key) qs.set('playerKey', key);
+            if (r.name) qs.set('name', r.name);
+            if (r.country) qs.set('country', r.country);
+            if (r.rank != null) qs.set('rank', String(r.rank));
+            const nameHtml = key
+                ? `<a class="player-name hist-player" href="player.html?${qs.toString()}">${escapeHtml(r.name)}</a>`
+                : escapeHtml(r.name);
+            return `
+            <tr${key ? ` data-player-key="${escapeHtml(key)}" data-tour="ATP"` : ''}>
+                <td class="col-rank">${r.rank != null ? escapeHtml(r.rank) : ''}</td>
                 <td class="col-flag">${iocFlag(r.country)}</td>
-                <td class="col-name">${escapeHtml(r.name)}</td>
+                <td class="col-name">${nameHtml}</td>
                 <td class="col-country">${escapeHtml(r.country || '—')}</td>
-                <td class="col-pts num">${r.points != null ? r.points.toLocaleString() : '—'}</td>
-            </tr>`).join('');
+                <td class="col-pts num">${r.points != null ? Number(r.points).toLocaleString() : '—'}</td>
+            </tr>`;
+        }).join('');
     }
 
     function escapeHtml(s) {
