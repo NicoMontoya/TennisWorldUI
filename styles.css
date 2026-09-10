@@ -7076,6 +7076,25 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     padding: 1.25rem 1rem 0.75rem;
 }
 
+.vintage-skel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    width: min(28rem, 82%);
+}
+.vintage-skel .skeleton-line { height: 10px; }
+.vintage-skel-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+}
+.vintage-chart-wrap .chart-loading {
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
 .vintage-note {
     font-family: var(--font-sans);
     font-size: 0.8125rem;
@@ -7085,14 +7104,22 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
 }
 
 @media (max-width: 768px) {
-    .metric-toggle { display: flex; width: 100%; }
-    .vintage-toggles { width: 100%; }
+    .metric-toggle { display: flex; width: 100%; max-width: 100%; min-width: 0; }
+    .vintage-toggles { width: 100%; min-width: 0; max-width: 100%; }
 }
 
 @media (max-width: 640px) {
     .vintage-chart-wrap { height: 380px; }
     .vintage-controls   { flex-direction: column; align-items: stretch; }
-    .vintage-add input  { flex: 1; }
+    .vintage-add {
+        display: flex;
+        flex-wrap: wrap;
+        width: 100%;
+        min-width: 0;
+        gap: 0.5rem;
+    }
+    .vintage-add input  { flex: 1 1 140px; min-width: 0; }
+    .vintage-reset      { flex: 0 0 auto; }
 }
 
 /* ── Historical rankings (Time Machine) ──────────────────────────────────── */
@@ -7791,7 +7818,20 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
 }
 
 @media (max-width: 375px) {
-    .vintage-toggles { width: 100%; }
+    .vintage-toggles { width: 100%; min-width: 0; max-width: 100%; overflow: visible; }
+    .metric-toggle {
+        display: flex;
+        flex-wrap: nowrap;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+    }
+    .metric-btn { flex: 0 0 auto; }
+    .vintage-add { width: 100%; min-width: 0; flex-wrap: wrap; }
+    .vintage-reset { flex: 0 0 auto; }
     .view-toggle { max-width: 100%; }
     .digest-toolbar,
     .smc,

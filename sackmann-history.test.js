@@ -7,6 +7,7 @@ const homeSrc = readFileSync(new URL('./home.js', import.meta.url), 'utf8');
 const indexHtml = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const histSrc = readFileSync(new URL('./rankings-history.js', import.meta.url), 'utf8');
 const swSrc = readFileSync(new URL('./sw.js', import.meta.url), 'utf8');
+const stylesSrc = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
 describe('player ranking history', () => {
     it('fetches /api/player-ranking-history with encoded ATP/WTA keys', () => {
@@ -42,10 +43,24 @@ describe('vintage curves legends', () => {
 
     it('shows a clear empty state when roster or curves are missing', () => {
         expect(indexHtml).toMatch(/id="vintageEmpty"/);
+        expect(indexHtml).toMatch(/vintage-skel/);
         expect(homeSrc).toMatch(/Legend career curves are not loaded yet/);
         expect(homeSrc).toMatch(/No vintage roster available/);
         expect(homeSrc).toMatch(/No career curves available/);
         expect(homeSrc).toMatch(/error === 'not-loaded'/);
+        expect(homeSrc).toMatch(/error === 'no-birthday'/);
+        expect(homeSrc).toMatch(/error: 'fetch-failed'/);
+        expect(homeSrc).toMatch(/function classifyVintage/);
+        expect(homeSrc).toMatch(/MAX_PLAYERS\s*=\s*12/);
+        expect(homeSrc).toMatch(/METRIC_KEYS\s*=\s*\['w', 'm', 't', 'ms', 'gs'\]/);
+        expect(homeSrc).not.toMatch(/yAxisID/);
+        expect(homeSrc).not.toMatch(/rate%/);
+        expect(homeSrc).toMatch(/chip\.replaceChildren|createElement\('span'\)/);
+        expect(homeSrc).toMatch(/name\.textContent = p\.name/);
+        expect(stylesSrc).toMatch(/overflow-x:\s*auto/);
+        expect(stylesSrc).toMatch(/@media \(max-width: 375px\)/);
+        expect(indexHtml).toMatch(/data-metric="gs"/);
+        expect(indexHtml).not.toMatch(/cdn\.jsdelivr\.net\/npm\/(?!chart\.js)/);
     });
 });
 
@@ -67,8 +82,8 @@ describe('Time Machine weekly rankings', () => {
 });
 
 describe('service worker', () => {
-    it('precaches home.js and the history client on tw-v41', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v41'/);
+    it('precaches home.js and the history client on tw-v42', () => {
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v42'/);
         expect(swSrc).toMatch(/'\/home\.js'/);
         expect(swSrc).toMatch(/'\/rankings-history\.js'/);
         expect(swSrc).toMatch(/'\/player\.js'/);
