@@ -135,10 +135,10 @@ describe('home has no Peak Overlap leftovers', () => {
     });
 });
 
-describe('service worker tw-v41', () => {
+describe('service worker tw-v42', () => {
     it('bumps cache and drops peakOverlap from the shell', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v41'/);
-        expect(swSrc).not.toMatch(/tw-v40/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v42'/);
+        expect(swSrc).not.toMatch(/tw-v41/);
         expect(swSrc).not.toMatch(/peakOverlap/);
         expect(swSrc).toMatch(/'\/components\/RivalryArc\.js'/);
     });

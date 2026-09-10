@@ -14,6 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const STORAGE_KEY   = 'tw-vintage-players';
     const TOUR          = 'ATP';
     const MAX_CONCURRENT = 3;
+    const MAX_PLAYERS   = 12;      // cap ~8–12; default ATP top 10 is within this
+    const METRIC_KEYS   = ['w', 'm', 't', 'ms', 'gs'];
 
     // Categorical palette — validated (dataviz six-checks) against #ffffff and
     // #1c2333 card surfaces. Slot order is the CVD-safety mechanism; do not sort.
@@ -68,7 +70,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadSelection() {
         try {
             const raw = JSON.parse(localStorage.getItem(STORAGE_KEY));
-            if (Array.isArray(raw) && raw.length && raw.every(p => p.id && p.name && Number.isInteger(p.slot))) return raw;
+            if (Array.isArray(raw) && raw.length && raw.every(p => p.id && p.name && Number.isInteger(p.slot))) {
+                return raw.slice(0, MAX_PLAYERS);
+            }
         } catch { /* fall through to default */ }
         return null;
     }
@@ -79,6 +83,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const used = new Set(selection.map(p => p.slot));
         for (let s = 0; s < PALETTE_LIGHT.length; s++) if (!used.has(s)) return s;
         return selection.length % PALETTE_LIGHT.length;
+    }
+
+    function isLegendKey(id) {
+        return String(id || '').charAt(0) === 's';
+    }
+
+    // Keep finite (age, metric) points only — never invent zeros for KV misses.
+    function usablePoints(points) {
+        return (Array.isArray(points) ? points : []).filter(pt =>
+            pt && Number.isFinite(Number(pt.age))
+        );
+    }
+
+    function classifyVintage(id, data) {
+        if (!data || typeof data !== 'object') return { error: 'fetch-failed' };
+        const points = usablePoints(data.points);
+        const birthday = data.player && data.player.birthday;
+        if (!points.length) {
+            if (!birthday) return { error: 'no-birthday', player: data.player };
+            if (isLegendKey(id)) return { error: 'not-loaded', player: data.player };
+            return { player: data.player, points: [] };
+        }
+        return { ...data, points };
     }
 
     // ── Concurrency-limited fetch queue ───────────────────────────────────────
@@ -94,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const id = queue.shift();
             inFlight++;
             apiFetch(`/api/player-vintage?tour=${encodeURIComponent(TOUR)}&playerKey=${encodeURIComponent(id)}`)
-                .then(data => { curves.set(id, data); })
+                .then(data => { curves.set(id, classifyVintage(id, data)); })
                 .catch(()  => { curves.set(id, { error: 'fetch-failed' }); })
                 .finally(() => {
                     inFlight--;
@@ -129,12 +156,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function buildDatasets() {
         return selection
-            .filter(p => curves.get(p.id)?.points?.length)
+            .filter(p => {
+                const cv = curves.get(p.id);
+                return cv && !cv.error && usablePoints(cv.points).length;
+            })
             .map(p => {
                 const cv = curves.get(p.id);
+                const pts = usablePoints(cv.points)
+                    .filter(pt => Number.isFinite(Number(pt[metric])))
+                    .map(pt => ({ x: Number(pt.age), y: Number(pt[metric]) }));
                 return {
                     label: p.name,
-                    data: cv.points.map(pt => ({ x: pt.age, y: pt[metric] })),
+                    data: pts,
                     borderColor: seriesColor(p.slot),
                     backgroundColor: seriesColor(p.slot),
                     borderWidth: 2,
@@ -142,7 +175,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     pointHitRadius: 8,
                     tension: 0,
                 };
-            });
+            })
+            .filter(ds => ds.data.length);
     }
 
     function chartOptions() {
@@ -273,7 +307,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Selection mutations ───────────────────────────────────────────────────
     function addPlayer(entry) {
+        if (!entry || entry.id == null) return;
         if (selection.some(p => String(p.id) === String(entry.id))) return;
+        if (selection.length >= MAX_PLAYERS) {
+            if (els.note) els.note.textContent = 'Chart is capped at ' + MAX_PLAYERS + ' players.';
+            return;
+        }
         selection.push({ id: entry.id, name: entry.name, slot: freeSlot() });
         saveSelection();
         enqueue(entry.id);
@@ -309,8 +348,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     els.toggle.addEventListener('click', e => {
         const btn = e.target.closest('.metric-btn');
-        if (!btn || btn.dataset.metric === metric) return;
-        metric = btn.dataset.metric;
+        if (!btn) return;
+        const next = METRIC_KEYS.indexOf(btn.dataset.metric) >= 0 ? btn.dataset.metric : null;
+        if (!next || next === metric) return;
+        metric = next;
         els.toggle.querySelectorAll('.metric-btn').forEach(b => {
             const active = b === btn;
             b.classList.toggle('active', active);
