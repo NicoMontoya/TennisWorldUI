@@ -403,6 +403,29 @@
     }
 
     // ── H2H Quick Lookup ──────────────────────────────────────────────────────
+    // Autocomplete uses createElement + textContent / dataset only.
+    // Never interpolate API names or keys into innerHTML.
+
+    function h2hEl(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text != null && text !== '') node.textContent = text;
+        return node;
+    }
+
+    function safePlayerKey(raw) {
+        const s = String(raw == null ? '' : raw).trim();
+        if (!s || s.length > 32) return '';
+        if (/^s?\d+$/i.test(s)) return s;
+        if (/^[A-Za-z0-9_-]+$/.test(s)) return s;
+        return '';
+    }
+
+    function safeTour(raw) {
+        if (typeof parseTour === 'function') return parseTour(raw) || '';
+        const t = String(raw == null ? '' : raw).trim().toUpperCase();
+        return t === 'ATP' || t === 'WTA' ? t : '';
+    }
 
     let standingsCache = null;
     let selectedPlayerB = null;
@@ -452,10 +475,11 @@
             const list = [];
             const seen = new Set();
             const add = (p) => {
-                const k = String(p.playerKey || '');
-                if (!p.name || !k || seen.has(k) || k === String(playerKey)) return;
+                const k = safePlayerKey(p.playerKey);
+                const t = safeTour(p.tour);
+                if (!p.name || !k || seen.has(k) || k === safePlayerKey(playerKey)) return;
                 seen.add(k);
-                list.push(p);
+                list.push({ ...p, playerKey: k, tour: t || p.tour });
             };
             if (atp.status === 'fulfilled') (atp.value || []).forEach(p => add({ ...p, tour: 'ATP' }));
             if (wta.status === 'fulfilled') (wta.value || []).forEach(p => add({ ...p, tour: 'WTA' }));
@@ -473,44 +497,59 @@
 
     function filterDropdown(query) {
         const dropdown = document.getElementById('h2hDropdown');
+        if (!dropdown) return;
+        dropdown.replaceChildren();
         if (!query.trim() || !standingsCache) { dropdown.style.display = 'none'; return; }
 
         const q       = query.toLowerCase();
-        const matches = standingsCache.filter(p => p.name.toLowerCase().includes(q)).slice(0, 8);
+        const matches = standingsCache.filter(p => (p.name || '').toLowerCase().includes(q)).slice(0, 8);
 
         if (!matches.length) { dropdown.style.display = 'none'; return; }
 
-        dropdown.innerHTML = matches.map(p =>
-            `<li class="h2h-dropdown-item" role="option"
-                 data-key="${p.playerKey}" data-name="${p.name}" data-tour="${p.tour}">
-                <span class="h2h-drop-flag">${flag(p.country)}</span>
-                <span class="h2h-drop-name">${p.name}</span>
-                <span class="h2h-drop-rank">${p.legend ? 'Legend' : '#' + p.rank}</span>
-             </li>`
-        ).join('');
-        dropdown.style.display = 'block';
+        matches.forEach(p => {
+            const key = safePlayerKey(p.playerKey);
+            if (!key) return;
+            const item = h2hEl('li', 'h2h-dropdown-item');
+            item.setAttribute('role', 'option');
+            item.dataset.key = key;
+            item.dataset.name = p.name || '';
+            item.dataset.tour = safeTour(p.tour) || 'ATP';
 
-        dropdown.querySelectorAll('.h2h-dropdown-item').forEach(item => {
+            const country = p.country || p.countryAcr;
+            item.appendChild(h2hEl('span', 'h2h-drop-flag', typeof flag === 'function' ? flag(country) : ''));
+            item.appendChild(h2hEl('span', 'h2h-drop-name', p.name || ''));
+            const rankBit = p.legend ? 'Legend' : (p.rank != null && p.rank !== '' ? '#' + p.rank : '');
+            item.appendChild(h2hEl('span', 'h2h-drop-rank', rankBit));
+
             item.addEventListener('click', () => {
                 selectedPlayerB = {
                     playerKey: item.dataset.key,
                     name:      item.dataset.name,
                     tour:      item.dataset.tour,
                 };
-                document.getElementById('h2hPlayerBInput').value = item.dataset.name;
-                document.getElementById('h2hPlayerBDisplay').textContent = item.dataset.name;
+                const input = document.getElementById('h2hPlayerBInput');
+                if (input) input.value = item.dataset.name;
+                const display = document.getElementById('h2hPlayerBDisplay');
+                if (display) display.textContent = item.dataset.name;
                 dropdown.style.display = 'none';
-                document.getElementById('h2hCompareBtn').disabled = false;
+                const compareBtn = document.getElementById('h2hCompareBtn');
+                if (compareBtn) compareBtn.disabled = false;
             });
+            dropdown.appendChild(item);
         });
+        dropdown.style.display = dropdown.childElementCount ? 'block' : 'none';
     }
 
     async function runH2H(keyA, keyB, h2hTour) {
         const resultsEl = document.getElementById('h2hResults');
+        const a = safePlayerKey(keyA);
+        const b = safePlayerKey(keyB);
+        const t = safeTour(h2hTour) || 'ATP';
+        if (!resultsEl || !a || !b) return;
         resultsEl.innerHTML = skeletonHTML(4);
 
         try {
-            const data = await apiFetch(`/api/h2h?playerKeyA=${encodeURIComponent(keyA)}&playerKeyB=${encodeURIComponent(keyB)}&tour=${encodeURIComponent(h2hTour)}`);
+            const data = await apiFetch(`/api/h2h?playerKeyA=${encodeURIComponent(a)}&playerKeyB=${encodeURIComponent(b)}&tour=${encodeURIComponent(t)}`);
             renderH2HResults(data);
         } catch (err) {
             resultsEl.innerHTML = errorCardHTML('Could not load H2H data');
@@ -518,67 +557,97 @@
     }
 
     function renderH2HResults(data) {
-        const el      = document.getElementById('h2hResults');
+        const host = document.getElementById('h2hResults');
+        if (!host) return;
+        host.replaceChildren();
+
         const matches = data.h2hMatches || [];
         const splits  = data.surfaceSplits || {};
         const all     = splits.all || { p1wins: 0, p2wins: 0 };
 
-        const p1Name = document.getElementById('heroName').textContent;
+        const p1Name = document.getElementById('heroName')?.textContent || '';
         const p2Name = selectedPlayerB?.name || 'Opponent';
-        const total  = all.p1wins + all.p2wins;
-        const p1Pct  = total > 0 ? Math.round((all.p1wins / total) * 100) : 50;
+        const p1Pct  = (all.p1wins + all.p2wins) > 0
+            ? Math.round((all.p1wins / (all.p1wins + all.p2wins)) * 100)
+            : 50;
 
-        const recentRows = matches.slice(0, 10).map(m => {
-            const winner    = m.winner === 'First Player' ? m.player1Name : m.player2Name;
-            const score     = Array.isArray(m.setScores)
+        const summary = h2hEl('div', 'h2h-summary');
+        const header = h2hEl('div', 'h2h-record-header');
+        header.appendChild(h2hEl('span', 'h2h-p1-name', p1Name));
+        header.appendChild(h2hEl('span', 'h2h-record-badge', all.p1wins + '–' + all.p2wins));
+        header.appendChild(h2hEl('span', 'h2h-p2-name', p2Name));
+        summary.appendChild(header);
+
+        const bar = h2hEl('div', 'h2h-record-bar');
+        const barP1 = h2hEl('div', 'h2h-bar-p1');
+        barP1.style.width = p1Pct + '%';
+        bar.appendChild(barP1);
+        summary.appendChild(bar);
+
+        const splitWrap = h2hEl('div', 'h2h-surface-splits');
+        [['Hard', splits.hard], ['Clay', splits.clay], ['Grass', splits.grass]].forEach(([label, split]) => {
+            const node = mountSurfaceSplit(label, split || {});
+            if (node) splitWrap.appendChild(node);
+        });
+        summary.appendChild(splitWrap);
+        host.appendChild(summary);
+
+        if (!matches.length) {
+            host.appendChild(h2hEl('p', 'no-data-msg', 'No head-to-head matches found.'));
+            return;
+        }
+
+        const wrap = h2hEl('div', 'h2h-matches-wrap');
+        wrap.appendChild(h2hEl('h3', 'h2h-matches-title', 'Match History'));
+        const scroll = h2hEl('div', 'career-table-scroll');
+        const table = h2hEl('table', 'career-table h2h-match-table');
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        ['Date', 'Tournament', 'Winner', 'Score'].forEach(label => {
+            headRow.appendChild(h2hEl('th', null, label));
+        });
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        matches.slice(0, 10).forEach(m => {
+            const winner = m.winner === 'First Player' ? m.player1Name : m.player2Name;
+            const score = Array.isArray(m.setScores)
                 ? m.setScores.map(s => typeof s === 'string' ? s : `${s.p1}-${s.p2}`).join(', ')
-                : m.finalResult || '—';
-            const dateStr   = m.date ? new Date(m.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
-            const surfaceDot = `<span class="h2h-surface-dot h2h-surface-${(m.surface||'hard').toLowerCase()}"></span>`;
-            return `
-                <tr>
-                    <td class="h2h-match-date">${dateStr} ${surfaceDot}</td>
-                    <td class="h2h-match-tournament">${m.tournamentName || '—'}<span class="h2h-match-round"> · ${m.round || ''}</span></td>
-                    <td class="h2h-match-winner">${winner}</td>
-                    <td class="h2h-match-score">${score}</td>
-                </tr>`;
-        }).join('');
+                : (m.finalResult || '—');
+            const dateStr = m.date
+                ? new Date(m.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                : '—';
+            const surfRaw = String(m.surface || 'hard').toLowerCase();
+            const surf = surfRaw.indexOf('clay') !== -1 ? 'clay' : surfRaw.indexOf('grass') !== -1 ? 'grass' : 'hard';
 
-        el.innerHTML = `
-            <div class="h2h-summary">
-                <div class="h2h-record-header">
-                    <span class="h2h-p1-name">${p1Name}</span>
-                    <span class="h2h-record-badge">${all.p1wins}–${all.p2wins}</span>
-                    <span class="h2h-p2-name">${p2Name}</span>
-                </div>
-                <div class="h2h-record-bar">
-                    <div class="h2h-bar-p1" style="width:${p1Pct}%"></div>
-                </div>
-                <div class="h2h-surface-splits">
-                    ${renderSurfaceSplit('Hard',  splits.hard  || {})}
-                    ${renderSurfaceSplit('Clay',  splits.clay  || {})}
-                    ${renderSurfaceSplit('Grass', splits.grass || {})}
-                </div>
-            </div>
-            ${matches.length ? `
-            <div class="h2h-matches-wrap">
-                <h3 class="h2h-matches-title">Match History</h3>
-                <div class="career-table-scroll">
-                    <table class="career-table h2h-match-table">
-                        <thead><tr>
-                            <th>Date</th><th>Tournament</th><th>Winner</th><th>Score</th>
-                        </tr></thead>
-                        <tbody>${recentRows}</tbody>
-                    </table>
-                </div>
-            </div>` : '<p class="no-data-msg" style="margin-top:1rem;">No head-to-head matches found.</p>'}`;
+            const tr = document.createElement('tr');
+            const dateTd = h2hEl('td', 'h2h-match-date', dateStr + ' ');
+            dateTd.appendChild(h2hEl('span', 'h2h-surface-dot h2h-surface-' + surf));
+            tr.appendChild(dateTd);
+
+            const tourTd = h2hEl('td', 'h2h-match-tournament', m.tournamentName || '—');
+            tourTd.appendChild(h2hEl('span', 'h2h-match-round', ' · ' + (m.round || '')));
+            tr.appendChild(tourTd);
+
+            tr.appendChild(h2hEl('td', 'h2h-match-winner', winner || ''));
+            tr.appendChild(h2hEl('td', 'h2h-match-score', score));
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        scroll.appendChild(table);
+        wrap.appendChild(scroll);
+        host.appendChild(wrap);
     }
 
-    function renderSurfaceSplit(label, split) {
+    function mountSurfaceSplit(label, split) {
         const p1 = split.p1wins || 0;
         const p2 = split.p2wins || 0;
-        if (p1 + p2 === 0) return '';
-        return `<span class="h2h-split-item"><span class="h2h-split-surface">${label}</span> ${p1}–${p2}</span>`;
+        if (p1 + p2 === 0) return null;
+        const item = h2hEl('span', 'h2h-split-item');
+        item.appendChild(h2hEl('span', 'h2h-split-surface', label));
+        item.appendChild(document.createTextNode(' ' + p1 + '–' + p2));
+        return item;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

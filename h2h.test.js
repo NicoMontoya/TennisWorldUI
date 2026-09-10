@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 
 const h2hSrc = readFileSync(new URL('./h2h.js', import.meta.url), 'utf8');
+const playerSrc = readFileSync(new URL('./player.js', import.meta.url), 'utf8');
+const playerHtml = readFileSync(new URL('./player.html', import.meta.url), 'utf8');
 
 function loadH2H() {
     const fn = new Function(
@@ -102,5 +104,24 @@ describe('H2H modal RivalryArc slot', () => {
         expect(h2hSrc).toMatch(/TW\.RivalryArc\.mount/);
         expect(h2hSrc).toMatch(/encodeURIComponent\(a\)/);
         expect(h2hSrc).toMatch(/encodeURIComponent\(b\)/);
+    });
+});
+
+describe('player profile H2H dropdown XSS', () => {
+    it('does not build #h2hDropdown via innerHTML with names or keys', () => {
+        expect(playerHtml).toMatch(/id="h2hDropdown"/);
+        expect(playerSrc).toMatch(/function filterDropdown/);
+        expect(playerSrc).not.toMatch(/dropdown\.innerHTML/);
+        expect(playerSrc).not.toMatch(/data-key="\$\{/);
+        expect(playerSrc).not.toMatch(/data-name="\$\{/);
+        expect(playerSrc).not.toMatch(/innerHTML[\s\S]{0,200}\$\{p\.name\}/);
+        expect(playerSrc).not.toMatch(/innerHTML[\s\S]{0,200}\$\{p2Name\}/);
+        expect(playerSrc).not.toMatch(/innerHTML[\s\S]{0,200}\$\{winner\}/);
+        expect(playerSrc).toMatch(/replaceChildren/);
+        expect(playerSrc).toMatch(/h2hEl\('li', 'h2h-dropdown-item'\)/);
+        expect(playerSrc).toMatch(/dataset\.key/);
+        expect(playerSrc).toMatch(/dataset\.name/);
+        expect(playerSrc).toMatch(/function safePlayerKey/);
+        expect(playerSrc).toMatch(/h2h-drop-name/);
     });
 });
