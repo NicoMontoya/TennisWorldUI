@@ -34,7 +34,7 @@
     }
     </script>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=tw41">
+    <link rel="stylesheet" href="styles.css?v=tw42">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e14">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -121,7 +121,15 @@
             <div class="vintage-chips" id="playerChips" aria-label="Players on the chart"></div>
 
             <div class="chart-wrap vintage-chart-wrap" id="vintageChartWrap">
-                <div class="chart-loading" id="vintageLoading">Loading career data…</div>
+                <div class="chart-loading" id="vintageLoading">
+                    <div class="vintage-skel" aria-hidden="true">
+                        <div class="skeleton-line" style="width:92%"></div>
+                        <div class="skeleton-line" style="width:78%"></div>
+                        <div class="skeleton-line" style="width:86%"></div>
+                        <div class="skeleton-line" style="width:64%"></div>
+                    </div>
+                    <span class="vintage-skel-label">Loading career data…</span>
+                </div>
                 <div class="chart-empty" id="vintageEmpty" hidden>No career curves available.</div>
                 <canvas id="vintageChart" role="img" aria-label="Vintage curves: cumulative matches won by player age"></canvas>
             </div>
