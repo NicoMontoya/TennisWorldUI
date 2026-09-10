@@ -2,7 +2,7 @@
 // TennisWorld — RivalryArc
 // ===================================
 // SVG sparkline of finished H2H meetings. In-repo only — no CDN, no chart lib.
-// Mount: TW.RivalryArc.mount(el, { meetings, player1Key, player2Key })
+// Mount: TW.RivalryArc.mount(el, { meetings, player1Key, player2Key, player1Name, player2Name })
 // Names/captions use textContent only. Never interpolate API strings into HTML.
 
 (function (root) {
@@ -92,16 +92,18 @@
         };
     }
 
+    function nameOfKey(finished, key, player1Key, player2Key, names) {
+        const n1 = names && names.player1Name;
+        const n2 = names && names.player2Name;
+        if (String(key) === String(player1Key)) return lastName(nameForKey(finished, player1Key, n1)) || 'P1';
+        if (String(key) === String(player2Key)) return lastName(nameForKey(finished, player2Key, n2)) || 'P2';
+        return 'Player';
+    }
+
     function streakCaption(meetings, player1Key, player2Key, names) {
         const finished = finishedMeetings(meetings, player1Key, player2Key);
         const streak = deriveStreak(finished, player1Key, player2Key);
-        const n1 = names && names.player1Name;
-        const n2 = names && names.player2Name;
-        const nameOf = (key) => {
-            if (String(key) === String(player1Key)) return lastName(nameForKey(finished, player1Key, n1)) || 'P1';
-            if (String(key) === String(player2Key)) return lastName(nameForKey(finished, player2Key, n2)) || 'P2';
-            return 'Player';
-        };
+        const nameOf = (key) => nameOfKey(finished, key, player1Key, player2Key, names);
         if (!finished.length) return 'No finished meetings';
         if (streak.count >= 2 && streak.holderKey) {
             return nameOf(streak.holderKey) + ' — ' + streak.count + '-match streak';
@@ -110,6 +112,48 @@
             return nameOf(streak.holderKey) + ' won the last meeting';
         }
         return finished.length + ' finished meeting' + (finished.length === 1 ? '' : 's');
+    }
+
+    function recordSplit(meetings, player1Key, player2Key) {
+        const finished = finishedMeetings(meetings, player1Key, player2Key);
+        const rec = {
+            all: { a: 0, b: 0 },
+            hard: { a: 0, b: 0 },
+            clay: { a: 0, b: 0 },
+            grass: { a: 0, b: 0 },
+        };
+        finished.forEach(m => {
+            const w = winnerKey(m);
+            const surf = normalizeSurface(m.surface);
+            if (String(w) === String(player1Key)) {
+                rec.all.a++;
+                rec[surf].a++;
+            } else if (String(w) === String(player2Key)) {
+                rec.all.b++;
+                rec[surf].b++;
+            }
+        });
+        return rec;
+    }
+
+    function leadsCaption(meetings, player1Key, player2Key, names) {
+        const finished = finishedMeetings(meetings, player1Key, player2Key);
+        if (!finished.length) return '';
+        const rec = recordSplit(finished, player1Key, player2Key);
+        const n1 = nameOfKey(finished, player1Key, player1Key, player2Key, names);
+        const n2 = nameOfKey(finished, player2Key, player1Key, player2Key, names);
+        let lead;
+        if (rec.all.a > rec.all.b) lead = n1 + ' leads ' + rec.all.a + '–' + rec.all.b;
+        else if (rec.all.b > rec.all.a) lead = n2 + ' leads ' + rec.all.b + '–' + rec.all.a;
+        else lead = 'Tied ' + rec.all.a + '–' + rec.all.b;
+        const parts = [];
+        ['hard', 'clay', 'grass'].forEach(surf => {
+            const s = rec[surf];
+            if (s.a + s.b === 0) return;
+            const label = surf.charAt(0).toUpperCase() + surf.slice(1);
+            parts.push(label + ' ' + s.a + '–' + s.b);
+        });
+        return parts.length ? lead + ' · ' + parts.join(' · ') : lead;
     }
 
     function buildSvg(nodes) {
@@ -195,7 +239,7 @@
 
         const caption = document.createElement('p');
         caption.className = 'rivalry-arc-caption';
-        caption.textContent = streakCaption(finished, player1Key, player2Key, opts);
+        caption.textContent = leadsCaption(finished, player1Key, player2Key, opts);
 
         const n1 = lastName(nameForKey(finished, player1Key, opts.player1Name)) || 'P1';
         const n2 = lastName(nameForKey(finished, player2Key, opts.player2Name)) || 'P2';
@@ -216,6 +260,8 @@
         finishedMeetings,
         deriveStreak,
         streakCaption,
+        leadsCaption,
+        recordSplit,
         normalizeSurface,
         winnerKey,
         MAX_NODES,
