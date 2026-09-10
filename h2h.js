@@ -1,6 +1,8 @@
 // ===================================
 // TennisWorld — Head to Head
 // ===================================
+// Autocomplete and modal content use createElement + textContent / dataset.
+// Never interpolate API strings (names, keys, tournaments, scores) into innerHTML.
 
 (function () {
     'use strict';
@@ -13,6 +15,35 @@
     let playerB = null;
     let currentSurface = 'all';
     let currentData    = null;
+    let tabsBound      = false;
+
+    // ── DOM helpers ───────────────────────────────────────────────────────────
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text != null && text !== '') node.textContent = text;
+        return node;
+    }
+
+    // Allow RapidAPI numeric keys and Sackmann `s{id}` legends. Reject markup.
+    function safePlayerKey(raw) {
+        const s = String(raw == null ? '' : raw).trim();
+        if (!s || s.length > 32) return '';
+        if (/^s?\d+$/i.test(s)) return s;
+        if (/^[A-Za-z0-9_-]+$/.test(s)) return s;
+        return '';
+    }
+
+    function safeTour(raw) {
+        if (typeof parseTour === 'function') return parseTour(raw) || '';
+        const t = String(raw == null ? '' : raw).trim().toUpperCase();
+        return t === 'ATP' || t === 'WTA' ? t : '';
+    }
+
+    function flagEmoji(country) {
+        return typeof flag === 'function' ? flag(country) : '';
+    }
 
     // ── Surface resolution ────────────────────────────────────────────────────
     // New API backend includes a real `surface` field per match.
@@ -29,7 +60,10 @@
     }
 
     function getMatchSurface(match) {
-        return match.surface || inferSurface(match);
+        const raw = match && match.surface ? String(match.surface).toLowerCase() : inferSurface(match);
+        if (raw.indexOf('clay') !== -1) return 'clay';
+        if (raw.indexOf('grass') !== -1) return 'grass';
+        return 'hard';
     }
 
     // ── Player list (autocomplete data) ───────────────────────────────────────
@@ -50,10 +84,12 @@
         const list = [];
         const seen = new Set();                       // dedupe by tour+name; standings win
         const add = (p, tour) => {
-            const k = `${tour}:${(p.name || '').toLowerCase()}`;
-            if (!p.name || !p.playerKey || seen.has(k)) return;
+            const key = safePlayerKey(p.playerKey);
+            const t = safeTour(tour) || safeTour(p.tour);
+            const k = `${t}:${(p.name || '').toLowerCase()}`;
+            if (!p.name || !key || !t || seen.has(k)) return;
             seen.add(k);
-            list.push({ ...p, tour });
+            list.push({ ...p, playerKey: key, tour: t });
         };
 
         if (atp.status === 'fulfilled') (atp.value || []).forEach(p => add(p, 'ATP'));
@@ -74,26 +110,35 @@
 
     function renderDropdown(query, players, onSelect, dropEl) {
         const q = query.trim().toLowerCase();
+        dropEl.replaceChildren();
         if (!q || !players.length) { dropEl.hidden = true; return; }
 
-        const hits = players.filter(p => p.name.toLowerCase().includes(q)).slice(0, 8);
+        const hits = players.filter(p => (p.name || '').toLowerCase().includes(q)).slice(0, 8);
         if (!hits.length) { dropEl.hidden = true; return; }
 
-        dropEl.innerHTML = hits.map(p => `
-            <div class="h2h-drop-item" data-key="${p.playerKey}">
-                <span class="h2h-drop-flag">${flag(p.country)}</span>
-                <span class="h2h-drop-name">${p.name}</span>
-                <span class="h2h-drop-meta">${p.legend ? 'Legend' : '#' + p.rank} ${p.tour}</span>
-            </div>`).join('');
-        dropEl.hidden = false;
+        hits.forEach(p => {
+            const key = safePlayerKey(p.playerKey);
+            if (!key) return;
+            const item = el('div', 'h2h-drop-item');
+            item.dataset.key = key;
+            item.setAttribute('role', 'option');
 
-        dropEl.querySelectorAll('.h2h-drop-item').forEach(item => {
+            item.appendChild(el('span', 'h2h-drop-flag', flagEmoji(p.country)));
+            item.appendChild(el('span', 'h2h-drop-name', p.name || ''));
+
+            const tour = safeTour(p.tour);
+            const rankBit = p.legend ? 'Legend' : (p.rank != null && p.rank !== '' ? '#' + p.rank : '');
+            const meta = [rankBit, tour].filter(Boolean).join(' ');
+            item.appendChild(el('span', 'h2h-drop-meta', meta));
+
             item.addEventListener('mousedown', e => {
                 e.preventDefault();
-                const player = players.find(p => p.playerKey === item.dataset.key);
+                const player = players.find(x => safePlayerKey(x.playerKey) === item.dataset.key);
                 if (player) onSelect(player);
             });
+            dropEl.appendChild(item);
         });
+        dropEl.hidden = !dropEl.childElementCount;
     }
 
     function wireSearch(inputEl, dropEl, slot, compareBtn) {
@@ -130,9 +175,15 @@
     // ── H2H fetch ─────────────────────────────────────────────────────────────
 
     async function fetchH2H(keyA, keyB, tour) {
-        const ckey = `${[keyA, keyB].sort().join('|')}|${tour}`;
+        const a = safePlayerKey(keyA);
+        const b = safePlayerKey(keyB);
+        const t = safeTour(tour) || 'ATP';
+        if (!a || !b) throw new Error('Invalid player key');
+        const ckey = `${[a, b].sort().join('|')}|${t}`;
         if (h2hCache.has(ckey)) return h2hCache.get(ckey);
-        const data = await apiFetch(`/api/h2h?playerKeyA=${keyA}&playerKeyB=${keyB}&tour=${tour}`);
+        const data = await apiFetch(
+            `/api/h2h?playerKeyA=${encodeURIComponent(a)}&playerKeyB=${encodeURIComponent(b)}&tour=${encodeURIComponent(t)}`
+        );
         h2hCache.set(ckey, data);
         return data;
     }
@@ -140,7 +191,7 @@
     // ── Splits ────────────────────────────────────────────────────────────────
 
     function didAWin(match) {
-        const p1IsA = match.player1Key === playerA.playerKey;
+        const p1IsA = String(match.player1Key) === String(playerA.playerKey);
         const winnerIsP1 = match.winner === 'First Player';
         return p1IsA ? winnerIsP1 : !winnerIsP1;
     }
@@ -176,25 +227,20 @@
 
     // ── Match row ─────────────────────────────────────────────────────────────
 
-    function matchRow(m) {
+    function matchRowEl(m) {
         const aWon  = didAWin(m);
         const score = buildScoreStr(m);
 
-        // "Sinner def. Alcaraz" — last name only for brevity
-        const wName = (aWon ? playerA : playerB).name.split(' ').pop();
-        const lName = (aWon ? playerB : playerA).name.split(' ').pop();
+        const wName = String((aWon ? playerA : playerB).name || '').split(' ').pop();
+        const lName = String((aWon ? playerB : playerA).name || '').split(' ').pop();
 
-        // Strip redundant tournament name prefix from round string
         const roundClean = (m.round || '').replace(/^[^–\-]+-\s*/i, '').trim();
         const tournamentName = m.tournamentName || '—';
         const roundLabel  = roundClean && roundClean.toLowerCase() !== tournamentName.toLowerCase()
             ? ` — ${roundClean}` : '';
 
-        const year = m.date ? m.date.substring(0, 4) : '';
-        const tour = (playerA?.tour || playerB?.tour || 'ATP').toUpperCase();
-        const tournament = (m.tournamentKey && m.tournamentName)
-            ? `<a class="h2h-tournament-link" href="draws.html?tournamentKey=${m.tournamentKey}&season=${year}&name=${encodeURIComponent(m.tournamentName)}&tour=${tour}">${m.tournamentName}</a>`
-            : tournamentName;
+        const year = m.date ? String(m.date).substring(0, 4) : '';
+        const tour = safeTour(playerA?.tour || playerB?.tour) || 'ATP';
 
         const dateStr = m.date
             ? new Date(m.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
@@ -202,93 +248,161 @@
 
         const surf = getMatchSurface(m);
 
-        return `
-            <div class="h2h-match-row">
-                <div class="h2h-match-meta">
-                    <span class="h2h-match-date">${dateStr}</span>
-                    <span class="h2h-surf-dot h2h-surf-${surf}" title="${surf.charAt(0).toUpperCase() + surf.slice(1)}"></span>
-                    <span class="h2h-match-event">${tournament}${roundLabel}</span>
-                </div>
-                <div class="h2h-match-result">
-                    <span class="h2h-match-def ${aWon ? 'def-a' : 'def-b'}">${wName} def. ${lName}</span>
-                    <span class="h2h-match-score">${score}</span>
-                </div>
-            </div>`;
+        const row = el('div', 'h2h-match-row');
+        const meta = el('div', 'h2h-match-meta');
+        meta.appendChild(el('span', 'h2h-match-date', dateStr));
+
+        const dot = el('span', 'h2h-surf-dot h2h-surf-' + surf);
+        dot.title = surf.charAt(0).toUpperCase() + surf.slice(1);
+        meta.appendChild(dot);
+
+        const event = el('span', 'h2h-match-event');
+        if (m.tournamentKey && m.tournamentName) {
+            const link = el('a', 'h2h-tournament-link', m.tournamentName);
+            const qs = new URLSearchParams();
+            qs.set('tournamentKey', String(m.tournamentKey));
+            qs.set('season', year);
+            qs.set('name', m.tournamentName);
+            qs.set('tour', tour);
+            link.href = 'draws.html?' + qs.toString();
+            event.appendChild(link);
+        } else {
+            event.appendChild(document.createTextNode(tournamentName));
+        }
+        if (roundLabel) event.appendChild(document.createTextNode(roundLabel));
+        meta.appendChild(event);
+
+        const result = el('div', 'h2h-match-result');
+        result.appendChild(el('span', 'h2h-match-def ' + (aWon ? 'def-a' : 'def-b'), wName + ' def. ' + lName));
+        result.appendChild(el('span', 'h2h-match-score', score));
+
+        row.appendChild(meta);
+        row.appendChild(result);
+        return row;
     }
 
     // ── Record bar ────────────────────────────────────────────────────────────
 
-    function recordBarHTML(sp) {
+    function mountRecordBar(host, sp) {
+        host.replaceChildren();
         const total  = sp.a + sp.b;
         const aWidth = total ? Math.round((sp.a / total) * 100) : 50;
-        return `
-            <div class="h2h-bar-wrap">
-                <span class="h2h-bar-count h2h-bar-count-a">${sp.a}</span>
-                <div class="h2h-bar-track">
-                    <div class="h2h-bar-a" style="width:${aWidth}%"></div>
-                    <div class="h2h-bar-b" style="width:${100 - aWidth}%"></div>
-                </div>
-                <span class="h2h-bar-count h2h-bar-count-b">${sp.b}</span>
-            </div>
-            <div class="h2h-bar-labels">
-                <span>${playerA.name}</span>
-                <span class="h2h-total-label">${total} match${total !== 1 ? 'es' : ''}</span>
-                <span>${playerB.name}</span>
-            </div>`;
+
+        const wrap = el('div', 'h2h-bar-wrap');
+        wrap.appendChild(el('span', 'h2h-bar-count h2h-bar-count-a', String(sp.a)));
+        const track = el('div', 'h2h-bar-track');
+        const barA = el('div', 'h2h-bar-a');
+        barA.style.width = aWidth + '%';
+        const barB = el('div', 'h2h-bar-b');
+        barB.style.width = (100 - aWidth) + '%';
+        track.appendChild(barA);
+        track.appendChild(barB);
+        wrap.appendChild(track);
+        wrap.appendChild(el('span', 'h2h-bar-count h2h-bar-count-b', String(sp.b)));
+
+        const labels = el('div', 'h2h-bar-labels');
+        labels.appendChild(el('span', null, playerA.name || ''));
+        labels.appendChild(el('span', 'h2h-total-label', total + ' match' + (total !== 1 ? 'es' : '')));
+        labels.appendChild(el('span', null, playerB.name || ''));
+
+        host.appendChild(wrap);
+        host.appendChild(labels);
     }
 
     // ── Surface tabs ──────────────────────────────────────────────────────────
 
-    function surfaceTabsHTML(splits, active) {
-        return ['all', 'hard', 'clay', 'grass'].map(s => {
-            const cnt  = s === 'all' ? splits.all.a + splits.all.b : splits[s].a + splits[s].b;
+    function mountSurfTabs(host, splits, active) {
+        host.replaceChildren();
+        ['all', 'hard', 'clay', 'grass'].forEach(s => {
+            const cnt = s === 'all' ? splits.all.a + splits.all.b : splits[s].a + splits[s].b;
             const label = s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1);
-            return `<button class="h2h-surf-tab${s === active ? ' active' : ''}" data-surface="${s}">
-                ${label}${cnt ? `<span class="h2h-surf-count">${cnt}</span>` : ''}
-            </button>`;
-        }).join('');
+            const btn = el('button', 'h2h-surf-tab' + (s === active ? ' active' : ''));
+            btn.type = 'button';
+            btn.dataset.surface = s;
+            btn.appendChild(document.createTextNode(label));
+            if (cnt) btn.appendChild(el('span', 'h2h-surf-count', String(cnt)));
+            host.appendChild(btn);
+        });
+    }
+
+    function mountMatchList(host, matches, surface) {
+        host.replaceChildren();
+        if (!matches.length) {
+            const label = surface === 'all' ? '' : surface + ' ';
+            host.appendChild(el('div', 'h2h-empty', 'No ' + label + 'matches found.'));
+            return;
+        }
+        matches.forEach(m => host.appendChild(matchRowEl(m)));
+    }
+
+    function mountNamesHeader() {
+        const header = el('div', 'h2h-modal-header');
+        header.appendChild(el('span', 'h2h-name-a', (flagEmoji(playerA.country) + ' ' + (playerA.name || '')).trim()));
+        header.appendChild(el('span', 'h2h-modal-vs', 'vs'));
+        header.appendChild(el('span', 'h2h-name-b', ((playerB.name || '') + ' ' + flagEmoji(playerB.country)).trim()));
+        return header;
+    }
+
+    function mountSkeleton(host, n) {
+        host.replaceChildren();
+        for (let i = 0; i < n; i++) {
+            const line = el('div', 'skeleton-line');
+            line.style.width = (70 + (i % 3) * 10) + '%';
+            host.appendChild(line);
+        }
+    }
+
+    function mountError(host, message) {
+        host.replaceChildren();
+        const card = el('div', 'error-card');
+        card.setAttribute('role', 'alert');
+        card.appendChild(el('span', 'error-card-icon', '⚠'));
+        card.appendChild(el('span', 'error-card-msg', message));
+        host.appendChild(card);
     }
 
     // ── Full modal content ────────────────────────────────────────────────────
 
-    function renderContent(data, surface) {
+    function renderContent(contentEl, data, surface) {
         const finished = (data.h2hMatches || []).filter(m => m.status === 'Finished');
         const splits   = computeSplits(finished);
         const filtered = surface === 'all'
             ? finished
             : finished.filter(m => getMatchSurface(m) === surface);
         const sorted   = [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date));
-
         const sp = splits[surface] || splits.all;
 
-        const matchListHTML = sorted.length
-            ? sorted.map(matchRow).join('')
-            : `<div class="h2h-empty">No ${surface === 'all' ? '' : surface + ' '}matches found.</div>`;
+        contentEl.replaceChildren();
 
-        return `
-            <div class="h2h-modal-fixed">
-                <div class="h2h-modal-header">
-                    <span class="h2h-name-a">${flag(playerA.country)} ${playerA.name}</span>
-                    <span class="h2h-modal-vs">vs</span>
-                    <span class="h2h-name-b">${playerB.name} ${flag(playerB.country)}</span>
-                </div>
+        const fixed = el('div', 'h2h-modal-fixed');
+        fixed.appendChild(mountNamesHeader());
 
-                <div class="h2h-record" id="h2hRecord">
-                    ${recordBarHTML(sp)}
-                </div>
+        const record = el('div', 'h2h-record');
+        record.id = 'h2hRecord';
+        mountRecordBar(record, sp);
+        fixed.appendChild(record);
 
-                <div class="h2h-rivalry-slot" id="h2hRivalrySlot"></div>
-            </div>
+        const slot = el('div', 'h2h-rivalry-slot h2h-rivalry-arc');
+        slot.id = 'h2hRivalryArc';
+        slot.hidden = true;
+        fixed.appendChild(slot);
+        contentEl.appendChild(fixed);
 
-            <div class="h2h-modal-scroll">
-                <div class="h2h-surf-tabs" id="h2hSurfTabs">
-                    ${surfaceTabsHTML(splits, surface)}
-                </div>
+        const scroll = el('div', 'h2h-modal-scroll');
+        const tabs = el('div', 'h2h-surf-tabs');
+        tabs.id = 'h2hSurfTabs';
+        mountSurfTabs(tabs, splits, surface);
 
-                <div class="h2h-match-list" id="h2hMatchList">
-                    ${matchListHTML}
-                </div>
-            </div>`;
+        const list = el('div', 'h2h-match-list');
+        list.id = 'h2hMatchList';
+        mountMatchList(list, sorted, surface);
+
+        scroll.appendChild(tabs);
+        scroll.appendChild(list);
+        contentEl.appendChild(scroll);
+
+        bindTabs(contentEl);
+        mountRivalryArc(contentEl);
     }
 
     // ── Modal open / close ────────────────────────────────────────────────────
@@ -313,31 +427,71 @@
     // ── Surface tab delegation (runs after content renders) ───────────────────
 
     function bindTabs(contentEl) {
-        contentEl.querySelector('#h2hSurfTabs')?.addEventListener('click', e => {
+        if (tabsBound) return;
+        tabsBound = true;
+        contentEl.addEventListener('click', e => {
             const tab = e.target.closest('.h2h-surf-tab');
             if (!tab || !currentData) return;
 
-            currentSurface = tab.dataset.surface;
-            contentEl.querySelector('#h2hSurfTabs').innerHTML =
-                surfaceTabsHTML(computeSplits(
-                    (currentData.h2hMatches || []).filter(m => m.status === 'Finished')
-                ), currentSurface);
+            const next = tab.dataset.surface;
+            if (next !== 'all' && next !== 'hard' && next !== 'clay' && next !== 'grass') return;
+            currentSurface = next;
 
-            // Rebind after innerHTML swap
-            bindTabs(contentEl);
-
-            // Update record bar + match list without full re-render
             const finished = (currentData.h2hMatches || []).filter(m => m.status === 'Finished');
             const splits   = computeSplits(finished);
             const sp       = splits[currentSurface] || splits.all;
-            const filtered = currentSurface === 'all' ? finished : finished.filter(m => getMatchSurface(m) === currentSurface);
+            const filtered = currentSurface === 'all'
+                ? finished
+                : finished.filter(m => getMatchSurface(m) === currentSurface);
             const sorted   = [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date));
 
-            contentEl.querySelector('#h2hRecord').innerHTML = recordBarHTML(sp);
-            contentEl.querySelector('#h2hMatchList').innerHTML = sorted.length
-                ? sorted.map(matchRow).join('')
-                : `<div class="h2h-empty">No ${currentSurface === 'all' ? '' : currentSurface + ' '}matches found.</div>`;
+            const tabs = contentEl.querySelector('#h2hSurfTabs');
+            const record = contentEl.querySelector('#h2hRecord');
+            const list = contentEl.querySelector('#h2hMatchList');
+            if (tabs) mountSurfTabs(tabs, splits, currentSurface);
+            if (record) mountRecordBar(record, sp);
+            if (list) mountMatchList(list, sorted, currentSurface);
         });
+    }
+
+    // Fixed slot after header/record, before the scrolling match list.
+    function mountRivalryArc(contentEl) {
+        const slot = contentEl.querySelector('#h2hRivalryArc');
+        if (!slot || typeof TW === 'undefined' || !TW.RivalryArc || !currentData || !playerA || !playerB) {
+            if (slot) slot.hidden = true;
+            return;
+        }
+        const finished = (currentData.h2hMatches || []).filter(m => m.status === 'Finished');
+        const ok = TW.RivalryArc.mount(slot, {
+            meetings: finished,
+            player1Key: playerA.playerKey,
+            player2Key: playerB.playerKey,
+            player1Name: playerA.name,
+            player2Name: playerB.name,
+        });
+        if (!ok) slot.hidden = true;
+    }
+
+    // ── "TennisWorld Prediction" section (additive, reuses TW.ProbBar) ────
+    // Appended after the H2H content renders; renders nothing if the
+    // prediction API is unreachable or ProbBar isn't loaded.
+    function mountH2HPrediction(contentEl, tour) {
+        if (typeof TW === 'undefined' || !TW.ProbBar || !playerA || !playerB) return;
+        try {
+            const section = el('div', 'h2h-pred');
+            section.appendChild(el('h4', 'h2h-pred-title', 'TennisWorld Prediction'));
+            const barHost = el('div');
+            section.appendChild(barHost);
+            const scroll = contentEl.querySelector('.h2h-modal-scroll') || contentEl;
+            scroll.appendChild(section);
+            TW.ProbBar.mount(barHost, {
+                player1Key:  playerA.playerKey,
+                player1Name: playerA.name,
+                player2Key:  playerB.playerKey,
+                player2Name: playerB.name,
+                tour,
+            }, { tour }).then(mounted => { if (!mounted) section.remove(); });
+        } catch (_) { /* graceful absence */ }
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
@@ -360,66 +514,22 @@
             if (!playerA || !playerB) return;
             currentSurface = 'all';
 
-            // Loading state
-            content.innerHTML = `
-                <div class="h2h-modal-header">
-                    <span class="h2h-name-a">${flag(playerA.country)} ${playerA.name}</span>
-                    <span class="h2h-modal-vs">vs</span>
-                    <span class="h2h-name-b">${playerB.name} ${flag(playerB.country)}</span>
-                </div>
-                <div class="h2h-loading">
-                    ${skeletonHTML(5)}
-                </div>`;
+            content.replaceChildren();
+            content.appendChild(mountNamesHeader());
+            const loading = el('div', 'h2h-loading');
+            mountSkeleton(loading, 5);
+            content.appendChild(loading);
             openModal();
 
             try {
-                const tour = playerA.tour || playerB.tour || 'ATP';
+                const tour = safeTour(playerA.tour || playerB.tour) || 'ATP';
                 currentData = await fetchH2H(playerA.playerKey, playerB.playerKey, tour);
-                content.innerHTML = renderContent(currentData, 'all');
-                bindTabs(content);
-                mountRivalryArc(content);
+                renderContent(content, currentData, 'all');
                 mountH2HPrediction(content, tour);
             } catch (err) {
-                content.innerHTML = errorCardHTML('Could not load head-to-head data. Try again later.');
+                mountError(content, 'Could not load head-to-head data. Try again later.');
             }
         });
-
-        // Fixed slot after header/record, before the scrolling match list.
-        function mountRivalryArc(contentEl) {
-            const slot = contentEl.querySelector('#h2hRivalrySlot');
-            if (!slot || typeof TW === 'undefined' || !TW.RivalryArc || !currentData || !playerA || !playerB) return;
-            const finished = (currentData.h2hMatches || []).filter(m => m.status === 'Finished');
-            TW.RivalryArc.mount(slot, {
-                meetings: finished,
-                player1Key: playerA.playerKey,
-                player2Key: playerB.playerKey,
-                player1Name: playerA.name,
-                player2Name: playerB.name,
-            });
-        }
-
-        // ── "TennisWorld Prediction" section (additive, reuses TW.ProbBar) ────
-        // Appended after the H2H content renders; renders nothing if the
-        // prediction API is unreachable or ProbBar isn't loaded.
-        function mountH2HPrediction(contentEl, tour) {
-            if (typeof TW === 'undefined' || !TW.ProbBar || !playerA || !playerB) return;
-            try {
-                const section = document.createElement('div');
-                section.className = 'h2h-pred';
-                section.innerHTML = '<h4 class="h2h-pred-title">TennisWorld Prediction</h4>';
-                const barHost = document.createElement('div');
-                section.appendChild(barHost);
-                const scroll = contentEl.querySelector('.h2h-modal-scroll') || contentEl;
-                scroll.appendChild(section);
-                TW.ProbBar.mount(barHost, {
-                    player1Key:  playerA.playerKey,
-                    player1Name: playerA.name,
-                    player2Key:  playerB.playerKey,
-                    player2Name: playerB.name,
-                    tour,
-                }, { tour }).then(mounted => { if (!mounted) section.remove(); });
-            } catch (_) { /* graceful absence */ }
-        }
 
         document.getElementById('h2hModalClose')?.addEventListener('click', closeModal);
         document.getElementById('h2hModalBackdrop')?.addEventListener('click', closeModal);
@@ -429,5 +539,9 @@
     }
 
     document.addEventListener('DOMContentLoaded', init);
+
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = { renderDropdown, safePlayerKey, safeTour };
+    }
 
 }());

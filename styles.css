@@ -4505,8 +4505,16 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     padding: 0 2rem 2rem;
 }
 
-.h2h-rivalry-slot {
+.h2h-rivalry-slot,
+.h2h-rivalry-arc {
     margin: 0.35rem 0 0.15rem;
+    min-height: 56px;
+}
+.h2h-rivalry-slot[hidden],
+.h2h-rivalry-arc[hidden] {
+    display: none;
+    min-height: 0;
+    margin: 0;
 }
 
 /* ── Modal header (player names) ─────────────────────────────────────────── */
@@ -4774,6 +4782,10 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     .h2h-bar-count     { font-size: 1.5rem; }
     .h2h-match-row     { flex-direction: column; gap: 0.25rem; }
     .h2h-match-result  { justify-content: flex-start; }
+    .h2h-rivalry-slot:not([hidden]),
+    .h2h-rivalry-arc:not([hidden]) {
+        min-height: 48px;
+    }
 }
 
 

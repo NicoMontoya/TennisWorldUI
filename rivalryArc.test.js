@@ -9,6 +9,27 @@ const h2hSrc = readFileSync(new URL('./h2h.js', import.meta.url), 'utf8');
 const panelSrc = readFileSync(new URL('./player-panel.js', import.meta.url), 'utf8');
 const swSrc = readFileSync(new URL('./sw.js', import.meta.url), 'utf8');
 
+function loadArc() {
+    const fn = new Function(
+        'window',
+        'globalThis',
+        'module',
+        'document',
+        src + '; return module.exports;'
+    );
+    return fn({}, {}, { exports: {} }, {
+        createElementNS: () => ({ setAttribute() {}, appendChild() {} }),
+        createElement: () => ({
+            className: '',
+            hidden: false,
+            textContent: '',
+            setAttribute() {},
+            appendChild() {},
+            replaceChildren() {},
+        }),
+    });
+}
+
 describe('RivalryArc source contracts', () => {
     it('exposes mount(el, { meetings, player1Key, player2Key })', () => {
         expect(src).toMatch(/function mount\(el, opts\)/);
@@ -16,6 +37,8 @@ describe('RivalryArc source contracts', () => {
         expect(src).toMatch(/meetings/);
         expect(src).toMatch(/player1Key/);
         expect(src).toMatch(/player2Key/);
+        expect(src).toMatch(/player1Name/);
+        expect(src).toMatch(/player2Name/);
     });
 
     it('builds SVG in-repo and never uses innerHTML for API strings', () => {
@@ -35,24 +58,7 @@ describe('RivalryArc source contracts', () => {
 
 describe('streak derivation', () => {
     it('counts consecutive wins from the most recent finished meeting', () => {
-        const fn = new Function(
-            'window',
-            'globalThis',
-            'module',
-            'document',
-            src + '; return module.exports;'
-        );
-        const api = fn({}, {}, { exports: {} }, {
-            createElementNS: () => ({ setAttribute() {}, appendChild() {} }),
-            createElement: () => ({
-                className: '',
-                hidden: false,
-                textContent: '',
-                setAttribute() {},
-                appendChild() {},
-                replaceChildren() {},
-            }),
-        });
+        const api = loadArc();
         const meetings = [
             { status: 'Finished', date: '2024-01-01', winner: 'First Player', player1Key: 'A', player2Key: 'B', surface: 'hard' },
             { status: 'Finished', date: '2024-06-01', winner: 'Second Player', player1Key: 'A', player2Key: 'B', surface: 'clay' },
@@ -68,12 +74,40 @@ describe('streak derivation', () => {
     });
 });
 
+describe('leads + surface-split caption', () => {
+    it('summarizes the series lead and per-surface split', () => {
+        const api = loadArc();
+        const meetings = [
+            { status: 'Finished', date: '2024-01-01', winner: 'First Player', player1Key: 'A', player2Key: 'B', surface: 'hard' },
+            { status: 'Finished', date: '2024-06-01', winner: 'First Player', player1Key: 'A', player2Key: 'B', surface: 'clay' },
+            { status: 'Finished', date: '2025-01-01', winner: 'Second Player', player1Key: 'A', player2Key: 'B', surface: 'grass' },
+        ];
+        expect(api.leadsCaption(meetings, 'A', 'B', {
+            player1Name: 'Jannik Sinner',
+            player2Name: 'Carlos Alcaraz',
+        })).toBe('Sinner leads 2–1 · Hard 1–0 · Clay 1–0 · Grass 0–1');
+    });
+
+    it('says Tied when the series is even', () => {
+        const api = loadArc();
+        const meetings = [
+            { status: 'Finished', date: '2024-01-01', winner: 'First Player', player1Key: 'A', player2Key: 'B', surface: 'hard' },
+            { status: 'Finished', date: '2024-06-01', winner: 'Second Player', player1Key: 'A', player2Key: 'B', surface: 'hard' },
+        ];
+        expect(api.leadsCaption(meetings, 'A', 'B', {
+            player1Name: 'Jannik Sinner',
+            player2Name: 'Carlos Alcaraz',
+        })).toBe('Tied 1–1 · Hard 1–1');
+    });
+});
+
 describe('mount surfaces', () => {
     it('Analytics modal keeps the arc slot above the scrolling match list', () => {
         expect(h2hSrc).toMatch(/h2h-modal-fixed/);
-        expect(h2hSrc).toMatch(/h2hRivalrySlot/);
+        expect(h2hSrc).toMatch(/h2hRivalryArc/);
         expect(h2hSrc).toMatch(/TW\.RivalryArc\.mount/);
         expect(h2hSrc).toMatch(/h2h-modal-scroll/);
+        expect(src).toMatch(/leadsCaption/);
     });
 
     it('player panel has a collapsible Rivalries section', () => {
@@ -101,10 +135,10 @@ describe('home has no Peak Overlap leftovers', () => {
     });
 });
 
-describe('service worker tw-v40', () => {
+describe('service worker tw-v41', () => {
     it('bumps cache and drops peakOverlap from the shell', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v40'/);
-        expect(swSrc).not.toMatch(/tw-v39/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v41'/);
+        expect(swSrc).not.toMatch(/tw-v40/);
         expect(swSrc).not.toMatch(/peakOverlap/);
         expect(swSrc).toMatch(/'\/components\/RivalryArc\.js'/);
     });
