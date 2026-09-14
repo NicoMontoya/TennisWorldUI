@@ -156,6 +156,9 @@ let calTour  = 'ATP';
 const monthCache = {};
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Circle View is gone; drop any leftover layout preference so it cannot
+    // resurrect a radial renderer if the key is reintroduced later.
+    try { localStorage.removeItem('tw-bracket-layout'); } catch (_) {}
 
     // ── Build accordion + month strip ──────────────────────────────────────
     // Strip is the source of truth: the visible list is the selected month only.
@@ -397,13 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (typeof TW !== 'undefined' && TW.DrawBracket) {
             try {
-                // Layout preference: classic columns or the circular bracket
-                // (first round on the outer ring, final at the center).
-                let layout = 'columns';
-                try { layout = localStorage.getItem('tw-bracket-layout') || 'columns'; } catch (_) {}
-                const Renderer = (layout === 'circle' && TW.RadialBracket)
-                    ? TW.RadialBracket : TW.DrawBracket;
-                const { el, mostActiveRid } = Renderer(
+                const { el, mostActiveRid } = TW.DrawBracket(
                     drawToRender, currentDrawTour, currentDrawName, currentDrawYear
                 );
                 wrapEl.appendChild(el);
