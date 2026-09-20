@@ -97,11 +97,8 @@ describe('H2H dropdown XSS P0', () => {
 });
 
 describe('H2H modal RivalryArc slot', () => {
-    it('mounts TW.RivalryArc on #h2hRivalryArc above the scrolling history', () => {
-        expect(h2hSrc).toMatch(/id = 'h2hRivalryArc'|id = "h2hRivalryArc"/);
-        expect(h2hSrc).toMatch(/h2h-modal-fixed/);
-        expect(h2hSrc).toMatch(/h2h-modal-scroll/);
-        expect(h2hSrc).toMatch(/TW\.RivalryArc\.mount/);
+    it('delegates Analytics H2H to TW.H2HPresenter', () => {
+        expect(h2hSrc).toMatch(/TW\.H2HPresenter/);
         expect(h2hSrc).toMatch(/encodeURIComponent\(a\)/);
         expect(h2hSrc).toMatch(/encodeURIComponent\(b\)/);
     });

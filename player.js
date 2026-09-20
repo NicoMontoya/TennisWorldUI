@@ -540,114 +540,41 @@
         dropdown.style.display = dropdown.childElementCount ? 'block' : 'none';
     }
 
+    function profilePlayer1() {
+        return {
+            playerKey,
+            name: document.getElementById('heroName')?.textContent || urlName || '',
+            country: urlCountry,
+            tour,
+        };
+    }
+
     async function runH2H(keyA, keyB, h2hTour) {
         const resultsEl = document.getElementById('h2hResults');
+        const api = (typeof TW !== 'undefined' && TW.H2HPresenter) ? TW.H2HPresenter : null;
         const a = safePlayerKey(keyA);
         const b = safePlayerKey(keyB);
         const t = safeTour(h2hTour) || 'ATP';
-        if (!resultsEl || !a || !b) return;
-        resultsEl.innerHTML = skeletonHTML(4);
+        if (!resultsEl || !a || !b || !api) return;
+
+        const player1 = profilePlayer1();
+        const player2 = selectedPlayerB || { playerKey: b, name: '', tour: t };
+        api.mount(resultsEl, { loading: true, player1, player2 });
 
         try {
-            const data = await apiFetch(`/api/h2h?playerKeyA=${encodeURIComponent(a)}&playerKeyB=${encodeURIComponent(b)}&tour=${encodeURIComponent(t)}`);
-            renderH2HResults(data);
+            const data = await apiFetch(
+                `/api/h2h?playerKeyA=${encodeURIComponent(a)}&playerKeyB=${encodeURIComponent(b)}&tour=${encodeURIComponent(t)}`
+            );
+            api.mount(resultsEl, { data, player1, player2 });
         } catch (err) {
-            resultsEl.innerHTML = errorCardHTML('Could not load H2H data');
+            api.mount(resultsEl, {
+                error: true,
+                message: 'Could not load head-to-head data.',
+                player1,
+                player2,
+                onRetry: () => runH2H(keyA, keyB, h2hTour),
+            });
         }
-    }
-
-    function renderH2HResults(data) {
-        const host = document.getElementById('h2hResults');
-        if (!host) return;
-        host.replaceChildren();
-
-        const matches = data.h2hMatches || [];
-        const splits  = data.surfaceSplits || {};
-        const all     = splits.all || { p1wins: 0, p2wins: 0 };
-
-        const p1Name = document.getElementById('heroName')?.textContent || '';
-        const p2Name = selectedPlayerB?.name || 'Opponent';
-        const p1Pct  = (all.p1wins + all.p2wins) > 0
-            ? Math.round((all.p1wins / (all.p1wins + all.p2wins)) * 100)
-            : 50;
-
-        const summary = h2hEl('div', 'h2h-summary');
-        const header = h2hEl('div', 'h2h-record-header');
-        header.appendChild(h2hEl('span', 'h2h-p1-name', p1Name));
-        header.appendChild(h2hEl('span', 'h2h-record-badge', all.p1wins + '–' + all.p2wins));
-        header.appendChild(h2hEl('span', 'h2h-p2-name', p2Name));
-        summary.appendChild(header);
-
-        const bar = h2hEl('div', 'h2h-record-bar');
-        const barP1 = h2hEl('div', 'h2h-bar-p1');
-        barP1.style.width = p1Pct + '%';
-        bar.appendChild(barP1);
-        summary.appendChild(bar);
-
-        const splitWrap = h2hEl('div', 'h2h-surface-splits');
-        [['Hard', splits.hard], ['Clay', splits.clay], ['Grass', splits.grass]].forEach(([label, split]) => {
-            const node = mountSurfaceSplit(label, split || {});
-            if (node) splitWrap.appendChild(node);
-        });
-        summary.appendChild(splitWrap);
-        host.appendChild(summary);
-
-        if (!matches.length) {
-            host.appendChild(h2hEl('p', 'no-data-msg', 'No head-to-head matches found.'));
-            return;
-        }
-
-        const wrap = h2hEl('div', 'h2h-matches-wrap');
-        wrap.appendChild(h2hEl('h3', 'h2h-matches-title', 'Match History'));
-        const scroll = h2hEl('div', 'career-table-scroll');
-        const table = h2hEl('table', 'career-table h2h-match-table');
-        const thead = document.createElement('thead');
-        const headRow = document.createElement('tr');
-        ['Date', 'Tournament', 'Winner', 'Score'].forEach(label => {
-            headRow.appendChild(h2hEl('th', null, label));
-        });
-        thead.appendChild(headRow);
-        table.appendChild(thead);
-
-        const tbody = document.createElement('tbody');
-        matches.slice(0, 10).forEach(m => {
-            const winner = m.winner === 'First Player' ? m.player1Name : m.player2Name;
-            const score = Array.isArray(m.setScores)
-                ? m.setScores.map(s => typeof s === 'string' ? s : `${s.p1}-${s.p2}`).join(', ')
-                : (m.finalResult || '—');
-            const dateStr = m.date
-                ? new Date(m.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                : '—';
-            const surfRaw = String(m.surface || 'hard').toLowerCase();
-            const surf = surfRaw.indexOf('clay') !== -1 ? 'clay' : surfRaw.indexOf('grass') !== -1 ? 'grass' : 'hard';
-
-            const tr = document.createElement('tr');
-            const dateTd = h2hEl('td', 'h2h-match-date', dateStr + ' ');
-            dateTd.appendChild(h2hEl('span', 'h2h-surface-dot h2h-surface-' + surf));
-            tr.appendChild(dateTd);
-
-            const tourTd = h2hEl('td', 'h2h-match-tournament', m.tournamentName || '—');
-            tourTd.appendChild(h2hEl('span', 'h2h-match-round', ' · ' + (m.round || '')));
-            tr.appendChild(tourTd);
-
-            tr.appendChild(h2hEl('td', 'h2h-match-winner', winner || ''));
-            tr.appendChild(h2hEl('td', 'h2h-match-score', score));
-            tbody.appendChild(tr);
-        });
-        table.appendChild(tbody);
-        scroll.appendChild(table);
-        wrap.appendChild(scroll);
-        host.appendChild(wrap);
-    }
-
-    function mountSurfaceSplit(label, split) {
-        const p1 = split.p1wins || 0;
-        const p2 = split.p2wins || 0;
-        if (p1 + p2 === 0) return null;
-        const item = h2hEl('span', 'h2h-split-item');
-        item.appendChild(h2hEl('span', 'h2h-split-surface', label));
-        item.appendChild(document.createTextNode(' ' + p1 + '–' + p2));
-        return item;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

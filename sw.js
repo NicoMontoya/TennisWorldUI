@@ -8,7 +8,7 @@
 //
 // Bump CACHE_VERSION to force all clients to re-install.
 
-const CACHE_VERSION  = 'tw-v43';
+const CACHE_VERSION  = 'tw-v44';
 const SHELL_CACHE    = CACHE_VERSION + '-shell';
 const API_CACHE      = CACHE_VERSION + '-api';
 
@@ -27,6 +27,7 @@ const SHELL_ASSETS = [
     '/auth.js',
     '/player-panel.js',
     '/components/RivalryArc.js',
+    '/components/H2HPresenter.js',
     '/h2h.js',
     '/profile.js',
     '/player.js',

@@ -4517,6 +4517,39 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     margin: 0;
 }
 
+.h2h-presenter {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+}
+.h2h-modal-body > .h2h-presenter {
+    overflow: hidden;
+    height: 100%;
+}
+#h2hResults .h2h-presenter .h2h-modal-scroll {
+    max-height: 22rem;
+}
+.h2h-surf-block {
+    margin-top: 0.35rem;
+}
+.h2h-overall-record {
+    font-family: var(--font-serif);
+    font-size: 1.35rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+}
+.h2h-coverage-note {
+    margin: 1rem 0 0;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
 /* ── Modal header (player names) ─────────────────────────────────────────── */
 
 .h2h-modal-header {
