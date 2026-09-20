@@ -6,6 +6,7 @@ const homeSrc = readFileSync(new URL('./home.js', import.meta.url), 'utf8');
 const scoresSrc = readFileSync(new URL('./scores.js', import.meta.url), 'utf8');
 const scoresHtml = readFileSync(new URL('./scores.html', import.meta.url), 'utf8');
 const h2hSrc = readFileSync(new URL('./h2h.js', import.meta.url), 'utf8');
+const presenterSrc = readFileSync(new URL('./components/H2HPresenter.js', import.meta.url), 'utf8');
 const panelSrc = readFileSync(new URL('./player-panel.js', import.meta.url), 'utf8');
 const swSrc = readFileSync(new URL('./sw.js', import.meta.url), 'utf8');
 
@@ -103,10 +104,11 @@ describe('leads + surface-split caption', () => {
 
 describe('mount surfaces', () => {
     it('Analytics modal keeps the arc slot above the scrolling match list', () => {
-        expect(h2hSrc).toMatch(/h2h-modal-fixed/);
-        expect(h2hSrc).toMatch(/h2hRivalryArc/);
-        expect(h2hSrc).toMatch(/TW\.RivalryArc\.mount/);
-        expect(h2hSrc).toMatch(/h2h-modal-scroll/);
+        expect(h2hSrc).toMatch(/TW\.H2HPresenter/);
+        expect(presenterSrc).toMatch(/h2h-modal-fixed/);
+        expect(presenterSrc).toMatch(/h2hRivalryArc/);
+        expect(presenterSrc).toMatch(/TW\.RivalryArc\.mount/);
+        expect(presenterSrc).toMatch(/h2h-modal-scroll/);
         expect(src).toMatch(/leadsCaption/);
     });
 
@@ -135,11 +137,12 @@ describe('home has no Peak Overlap leftovers', () => {
     });
 });
 
-describe('service worker tw-v43', () => {
+describe('service worker tw-v44', () => {
     it('bumps cache and drops peakOverlap from the shell', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v43'/);
-        expect(swSrc).not.toMatch(/tw-v42/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v44'/);
+        expect(swSrc).not.toMatch(/tw-v43/);
         expect(swSrc).not.toMatch(/peakOverlap/);
         expect(swSrc).toMatch(/'\/components\/RivalryArc\.js'/);
+        expect(swSrc).toMatch(/'\/components\/H2HPresenter\.js'/);
     });
 });

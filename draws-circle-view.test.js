@@ -39,10 +39,10 @@ describe('Circle View removed from Draws', () => {
     });
 
     it('bumps the service worker cache past RadialBracket', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v43'/);
-        expect(swSrc).not.toMatch(/tw-v42/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v44'/);
+        expect(swSrc).not.toMatch(/tw-v43/);
         expect(swSrc).toMatch(/'\/components\/DrawBracket\.js'/);
-        expect(drawsHtml).toMatch(/styles\.css\?v=tw43/);
+        expect(drawsHtml).toMatch(/styles\.css\?v=tw44/);
     });
 
     it('keeps empty / loading / error copy unchanged', () => {
