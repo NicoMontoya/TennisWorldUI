@@ -3,7 +3,13 @@
 //
 // slotOrderVerified is read from the /api/draws payload when that field is a
 // boolean (API#13). Round flags are the fallback only when the payload omits
-// it. Tours are not special-cased.
+// it. Status does not special-case a tour or an event.
+//
+// A verified chip's title comes from slotOrderVerification when that object
+// is present: "Checked against the official ATP draw · Sep 26". checkedAt is
+// a plain YYYY-MM-DD, not an instant, so the day does not shift with the
+// time zone. Without the object, the title is the draw tour and no date.
+// Only ATP and WTA are used. sourceHost is not shown.
 //
 // Red ("Bracket order wrong") comes from an explicit ops mismatch flag, or
 // from a cheap slotIndex check when adjacent winners do not feed the next
@@ -20,6 +26,53 @@
     var LABEL_WRONG = 'Bracket order wrong';
     var BANNER_ADJACENT = 'Bracket order may be wrong. Adjacent slots do not match the next round, so this draw opens as a list.';
     var BANNER_OPS = 'Bracket order may be wrong. This draw opens as a list until the slot order is confirmed.';
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    function allowedTour(value) {
+        var t = String(value == null ? '' : value).trim().toUpperCase();
+        return t === 'ATP' || t === 'WTA' ? t : '';
+    }
+
+    // Calendar day from YYYY-MM-DD. The month and day in the copy are the
+    // digits in the string. Date.UTC only rejects impossible days (Feb 31);
+    // local getters are never used, so the label cannot move across zones.
+    function formatCheckedDay(value) {
+        var s = String(value == null ? '' : value).trim();
+        var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+        if (!m) return '';
+        var year = Number(m[1]);
+        var month = Number(m[2]);
+        var day = Number(m[3]);
+        if (month < 1 || month > 12) return '';
+        var utc = new Date(Date.UTC(year, month - 1, day));
+        if (utc.getUTCFullYear() !== year || utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day) return '';
+        return MONTHS[month - 1] + ' ' + String(day);
+    }
+
+    function verificationObject(payload) {
+        var v = payload && payload.slotOrderVerification;
+        if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+        return v;
+    }
+
+    function noDateTooltip(tour) {
+        return tour ? 'Checked against the official ' + tour + ' draw' : '';
+    }
+
+    // Verified only. Host is omitted: the chip copy is tour and, when the
+    // check record is usable, the plain date. A tour other than ATP/WTA is
+    // ignored and the date goes with it.
+    function verifiedTooltip(status, payload, drawTour) {
+        if (status !== 'verified') return '';
+        var fallback = allowedTour(drawTour) || allowedTour(payload && payload.tour);
+        var v = verificationObject(payload);
+        if (!v) return noDateTooltip(fallback);
+        var tour = allowedTour(v.tour);
+        if (!tour) return noDateTooltip(fallback);
+        var day = formatCheckedDay(v.checkedAt);
+        if (!day) return noDateTooltip(tour);
+        return 'Checked against the official ' + tour + ' draw \u00B7 ' + day;
+    }
 
     function isRealKey(k) {
         return k != null && k !== '' && k !== 'null' && k !== 'undefined';
@@ -184,7 +237,7 @@
         return s;
     }
 
-    function resolve(payload, rounds) {
+    function resolve(payload, rounds, drawTour) {
         var verified = null;
         var ops = null;
         var adjacentFail = false;
@@ -222,6 +275,7 @@
             listAvailable: true,
             bracketSecondary: status === 'wrong',
             slotLabel: slotFillLabel(rounds),
+            tooltip: verifiedTooltip(status, payload, drawTour),
         };
     }
 
