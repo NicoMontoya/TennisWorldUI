@@ -16,7 +16,7 @@
     <meta name="twitter:title"       content="TennisWorld — Tournament Draws & Calendar">
     <meta name="twitter:description" content="ATP and WTA tournament draws, brackets, and full year calendar.">
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=tw44">
+    <link rel="stylesheet" href="styles.css?v=tw45">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e14">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -110,7 +110,9 @@
                     <h2 class="draw-view-title" id="drawViewTitle">Full Draw</h2>
                     <div class="draw-view-sub" id="drawViewSub" role="status" aria-live="polite">—</div>
                 </div>
+                <div class="draw-order-tools" id="drawOrderTools"></div>
             </div>
+            <div id="drawOrderBanner" class="draw-order-banner" hidden></div>
 
             <!-- Bracket-maker controls (mode toggle, fill, save/manage) — injected by BracketMaker -->
             <div id="bracketControls"></div>
@@ -160,6 +162,7 @@
     <script src="components/BracketStore.js"></script>
     <script src="components/BracketMaker.js"></script>
     <script src="favorites.js"></script>
+    <script src="drawOrder.js"></script>
     <script src="draws.js"></script>
     <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "942ca2c26fd44a78b8f81b74b22f5f41"}'></script><!-- End Cloudflare Web Analytics -->
 </body>

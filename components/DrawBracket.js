@@ -381,43 +381,86 @@ window.TW = window.TW || {};
             }
         }
 
-        el.innerHTML =
-            pRowHtml(m.player1Name, m.player1Key, m.player1Seed,
-                     p1Won, isDone && !p1Won, isDone ? p1Sets : [], isLive, isChamp && p1Won, tour, isInf) +
-            `<div class="db-div"></div>` +
-            pRowHtml(m.player2Name, m.player2Key, m.player2Seed,
-                     p2Won, isDone && !p2Won, isDone ? p2Sets : [], isLive, isChamp && p2Won, tour, isInf);
+        el.appendChild(buildPlayerRow(
+            m.player1Name, m.player1Key, m.player1Seed,
+            p1Won, isDone && !p1Won, isDone ? p1Sets : [], isLive, isChamp && p1Won, tour, isInf
+        ));
+        const divider = document.createElement('div');
+        divider.className = 'db-div';
+        el.appendChild(divider);
+        el.appendChild(buildPlayerRow(
+            m.player2Name, m.player2Key, m.player2Seed,
+            p2Won, isDone && !p2Won, isDone ? p2Sets : [], isLive, isChamp && p2Won, tour, isInf
+        ));
 
         return el;
     }
 
-    function pRowHtml(name, key, seed, won, lost, sets, isLive, isChamp, tour, isInferred) {
-        const seedHtml = seed != null
-            ? `<span class="db-seed">${seed}</span>`
-            : `<span class="db-seed-gap"></span>`;
+    // Player names, seeds, and set scores are textContent. Never interpolated HTML.
+    function buildPlayerRow(name, key, seed, won, lost, sets, isLive, isChamp, tour, isInferred) {
+        const row = document.createElement('div');
+        row.className = 'db-prow' + (won ? ' db-prow-won' : '');
 
+        if (seed != null && seed !== '') {
+            const seedEl = document.createElement('span');
+            seedEl.className = 'db-seed';
+            seedEl.textContent = String(seed);
+            row.appendChild(seedEl);
+        } else {
+            const gap = document.createElement('span');
+            gap.className = 'db-seed-gap';
+            row.appendChild(gap);
+        }
+
+        const nameEl = document.createElement('span');
         let nameCls = 'db-pname';
-        if (won)       nameCls += ' db-won';
-        if (lost)      nameCls += ' db-lost';
+        if (won) nameCls += ' db-won';
+        if (lost) nameCls += ' db-lost';
         if (isInferred) nameCls += ' db-inf';
+        nameEl.className = nameCls;
+        const shown = (typeof TW !== 'undefined' && TW.DrawOrder && typeof TW.DrawOrder.displayPlayerName === 'function')
+            ? TW.DrawOrder.displayPlayerName(name)
+            : (String(name == null ? '' : name).trim() || 'TBD');
+        nameEl.textContent = shown;
 
         const validKey = key && key !== 'null' && key !== 'undefined' && key !== '';
-        const attrs = (validKey && !isInferred)
-            ? ` data-open-player data-player-key="${key}" data-name="${(name||'').replace(/"/g,'&quot;')}" data-tour="${tour}" data-country=""`
-            : '';
+        if (validKey && !isInferred) {
+            nameEl.setAttribute('data-open-player', '');
+            nameEl.dataset.playerKey = String(key);
+            nameEl.dataset.name = shown;
+            const tourCode = String(tour || '').toUpperCase();
+            nameEl.dataset.tour = tourCode === 'WTA' ? 'WTA' : 'ATP';
+            nameEl.dataset.country = '';
+        }
+        row.appendChild(nameEl);
 
-        const setsHtml = sets?.length
-            ? `<span class="db-sets">${sets.map(s => `<span class="db-s">${s}</span>`).join('')}</span>`
-            : (isLive ? `<span class="db-sets"><span class="db-s db-s-live">●</span></span>` : '');
+        if (sets && sets.length) {
+            const wrap = document.createElement('span');
+            wrap.className = 'db-sets';
+            sets.forEach(function (score) {
+                const cell = document.createElement('span');
+                cell.className = 'db-s';
+                cell.textContent = String(score);
+                wrap.appendChild(cell);
+            });
+            row.appendChild(wrap);
+        } else if (isLive) {
+            const wrap = document.createElement('span');
+            wrap.className = 'db-sets';
+            const cell = document.createElement('span');
+            cell.className = 'db-s db-s-live';
+            cell.textContent = '●';
+            wrap.appendChild(cell);
+            row.appendChild(wrap);
+        }
 
-        const champIcon = isChamp ? `<span class="db-champ-icon">★</span>` : '';
-
-        return `<div class="db-prow${won ? ' db-prow-won' : ''}">` +
-            seedHtml +
-            `<span class="${nameCls}"${attrs}>${name || 'TBD'}</span>` +
-            setsHtml +
-            champIcon +
-            `</div>`;
+        if (isChamp) {
+            const icon = document.createElement('span');
+            icon.className = 'db-champ-icon';
+            icon.textContent = '★';
+            row.appendChild(icon);
+        }
+        return row;
     }
 
     // ── SVG connector between adjacent round columns ──────────────────────────

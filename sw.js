@@ -8,7 +8,7 @@
 //
 // Bump CACHE_VERSION to force all clients to re-install.
 
-const CACHE_VERSION  = 'tw-v44';
+const CACHE_VERSION  = 'tw-v45';
 const SHELL_CACHE    = CACHE_VERSION + '-shell';
 const API_CACHE      = CACHE_VERSION + '-api';
 
@@ -34,6 +34,7 @@ const SHELL_ASSETS = [
     '/home.js',
     '/live.js',
     '/scores.js',
+    '/drawOrder.js',
     '/draws.js',
     '/rankings.js',
     '/rankings-history.js',

@@ -363,6 +363,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentDrawYear   = 0;      // season year
     // Whether the current tournament uses a round-robin format (no bracket)
     let currentDrawIsRR   = false;
+    // 'bracket' | 'list'. Red/mismatch defaults to list; the user can override.
+    let currentDrawLayout = 'bracket';
+    let drawLayoutUserSet = false;
+    let currentDrawPayload = null;
 
     // ── Toast notification ─────────────────────────────────────────────────
     function showDrawToast(msg) {
@@ -381,6 +385,234 @@ document.addEventListener('DOMContentLoaded', () => {
     // Uses DrawBracket component for tournaments with standard elimination rounds.
     // Falls back to flat round list for Round Robin / non-standard formats.
 
+    function resolveDrawOrder(payload, rounds) {
+        try {
+            if (typeof TW !== 'undefined' && TW.DrawOrder && typeof TW.DrawOrder.resolve === 'function') {
+                return TW.DrawOrder.resolve(payload, rounds);
+            }
+        } catch (err) {
+            console.warn('[DrawOrder]', err);
+        }
+        return {
+            status: 'unchecked',
+            label: 'Order unchecked',
+            banner: '',
+            defaultLayout: 'bracket',
+            listAvailable: true,
+            bracketSecondary: false,
+            slotLabel: '',
+        };
+    }
+
+    function clearDrawOrderChrome() {
+        const tools = document.getElementById('drawOrderTools');
+        const banner = document.getElementById('drawOrderBanner');
+        if (tools) tools.textContent = '';
+        if (banner) {
+            banner.textContent = '';
+            banner.hidden = true;
+        }
+    }
+
+    function setDrawLayout(next) {
+        drawLayoutUserSet = true;
+        currentDrawLayout = next === 'list' ? 'list' : 'bracket';
+        if (currentDrawLayout === 'list' && bracketMakerCtl && bracketMakerCtl.setMode) {
+            bracketMakerCtl.setMode('official');
+        } else if (bracketMakerCtl && bracketMakerCtl.renderNow) {
+            bracketMakerCtl.renderNow();
+        } else {
+            renderBracketView(null, 'official');
+        }
+        syncDrawOrderChrome();
+    }
+
+    // Chip, slot count, layout toggle, and the red-state banner.
+    // Strings go in with textContent — never innerHTML.
+    function syncDrawOrderChrome() {
+        const tools = document.getElementById('drawOrderTools');
+        const banner = document.getElementById('drawOrderBanner');
+        if (!tools || !banner) return;
+
+        const state = resolveDrawOrder(currentDrawPayload, currentDrawRounds);
+        tools.textContent = '';
+        banner.textContent = '';
+        banner.hidden = true;
+
+        const chip = document.createElement('span');
+        chip.className = 'draw-order-chip draw-order-chip-' + state.status;
+        chip.setAttribute('role', 'status');
+        chip.textContent = state.label;
+        tools.appendChild(chip);
+
+        if (state.slotLabel) {
+            const slots = document.createElement('span');
+            slots.className = 'draw-order-slots';
+            slots.textContent = state.slotLabel;
+            tools.appendChild(slots);
+        }
+
+        if (!currentDrawIsRR && state.listAvailable) {
+            const toggle = document.createElement('div');
+            toggle.className = 'view-toggle';
+            toggle.setAttribute('role', 'group');
+            toggle.setAttribute('aria-label', 'Draw layout');
+
+            const bracketBtn = document.createElement('button');
+            bracketBtn.type = 'button';
+            bracketBtn.className = 'view-toggle-btn';
+            if (currentDrawLayout === 'bracket') bracketBtn.classList.add('active');
+            if (state.bracketSecondary) bracketBtn.classList.add('is-secondary');
+            bracketBtn.textContent = 'Bracket';
+            bracketBtn.setAttribute('aria-pressed', currentDrawLayout === 'bracket' ? 'true' : 'false');
+            if (state.bracketSecondary) bracketBtn.title = 'Bracket order may be wrong';
+            bracketBtn.addEventListener('click', function () { setDrawLayout('bracket'); });
+
+            const listBtn = document.createElement('button');
+            listBtn.type = 'button';
+            listBtn.className = 'view-toggle-btn';
+            if (currentDrawLayout === 'list') listBtn.classList.add('active');
+            listBtn.textContent = 'List';
+            listBtn.setAttribute('aria-pressed', currentDrawLayout === 'list' ? 'true' : 'false');
+            listBtn.addEventListener('click', function () { setDrawLayout('list'); });
+
+            toggle.appendChild(bracketBtn);
+            toggle.appendChild(listBtn);
+            tools.appendChild(toggle);
+        }
+
+        if (state.banner) {
+            const copy = document.createElement('p');
+            copy.className = 'draw-order-banner-copy';
+            copy.textContent = state.banner;
+            banner.appendChild(copy);
+            banner.hidden = false;
+        }
+    }
+
+    function buildFlatRow(m) {
+        const isDone = isFinishedStatus(m.status);
+        const isLive = !!m.isLive;
+        const isDelayed = !isLive && !isDone && isDelayedStatus(m.status);
+        const p1Won = m.winner === 'player1';
+        const p2Won = m.winner === 'player2';
+
+        function label(name) {
+            if (typeof TW !== 'undefined' && TW.DrawOrder && typeof TW.DrawOrder.displayPlayerName === 'function') {
+                return TW.DrawOrder.displayPlayerName(name);
+            }
+            const raw = String(name == null ? '' : name).trim();
+            if (!raw || /^tbd$/i.test(raw)) return 'TBD';
+            return raw;
+        }
+
+        function addPlayer(cellClass, name, key, seed, won, lost) {
+            const cell = document.createElement('div');
+            cell.className = cellClass;
+            const n = Number(seed);
+            if (Number.isFinite(n) && n > 0) {
+                const pill = document.createElement('span');
+                pill.className = 'draw-seed-pill';
+                pill.textContent = String(Math.trunc(n));
+                cell.appendChild(pill);
+            }
+            const span = document.createElement('span');
+            span.className = 'draw-pname' + (won ? ' draw-won' : lost ? ' draw-lost' : '');
+            const shown = label(name);
+            span.textContent = shown;
+            if (key != null && key !== '' && key !== 'null' && key !== 'undefined') {
+                span.setAttribute('data-open-player', '');
+                span.dataset.playerKey = String(key);
+                span.dataset.name = shown;
+                span.dataset.tour = currentDrawTour === 'WTA' ? 'WTA' : 'ATP';
+                span.dataset.country = '';
+            }
+            cell.appendChild(span);
+            return cell;
+        }
+
+        const row = document.createElement('div');
+        row.className = 'draw-row-flat ' + (isLive ? 'draw-row-live' : isDone ? 'draw-row-done' : isDelayed ? 'draw-row-delayed' : 'draw-row-upcoming');
+        row.appendChild(addPlayer('draw-cell-p1', m.player1Name, m.player1Key, m.player1Seed, p1Won, isDone && !p1Won));
+
+        const mid = document.createElement('div');
+        mid.className = 'draw-cell-mid';
+        const score = document.createElement('span');
+        if (isLive) {
+            score.className = 'draw-badge draw-badge-live';
+            const setStr = m.setScores && m.setScores.length && typeof formatSetScores === 'function' ? formatSetScores(m.setScores) : '';
+            const pts = m.currentGame && typeof formatGameScore === 'function' ? formatGameScore(m.currentGame) : '';
+            score.textContent = (setStr ? setStr + ' ' : '') + (pts || 'Live');
+        } else if (isDone && m.setScores && m.setScores.length) {
+            score.className = 'draw-score-str';
+            score.textContent = typeof formatSetScores === 'function' ? formatSetScores(m.setScores) : '';
+        } else if (isDone) {
+            score.className = 'draw-score-str';
+            score.textContent = '—';
+        } else if (isDelayed) {
+            score.className = 'draw-badge draw-badge-delayed';
+            score.textContent = 'Delayed';
+        } else {
+            score.className = 'draw-vs';
+            score.textContent = 'vs';
+        }
+        mid.appendChild(score);
+        row.appendChild(mid);
+        row.appendChild(addPlayer('draw-cell-p2', m.player2Name, m.player2Key, m.player2Seed, p2Won, isDone && !p2Won));
+        return row;
+    }
+
+    // Flat rows in slotIndex order. No invented names — empty labels stay TBD.
+    function renderSlotList() {
+        const wrapEl = document.getElementById('roundMatchesWrap');
+        if (!wrapEl) return;
+        wrapEl.textContent = '';
+
+        const rounds = (currentDrawRounds || []).slice().sort(function (a, b) {
+            const ao = typeof a.order === 'number' ? a.order : 0;
+            const bo = typeof b.order === 'number' ? b.order : 0;
+            return bo - ao;
+        });
+        const orderedMatches = [];
+
+        rounds.forEach(function (r) {
+            const matches = (r.matches || []).slice().sort(function (a, b) {
+                const ai = a && a.slotIndex != null && isFinite(Number(a.slotIndex)) ? Number(a.slotIndex) : 1e9;
+                const bi = b && b.slotIndex != null && isFinite(Number(b.slotIndex)) ? Number(b.slotIndex) : 1e9;
+                return ai - bi;
+            });
+            if (!matches.length) return;
+
+            const section = document.createElement('section');
+            section.className = 'draw-list-section';
+            const rid = matches[0].roundId;
+            if (rid != null) section.dataset.roundId = String(rid);
+
+            const heading = document.createElement('h3');
+            heading.className = 'draw-list-round';
+            heading.textContent = cleanRound(r.round) || 'Round';
+            section.appendChild(heading);
+
+            const list = document.createElement('div');
+            list.className = 'draw-list';
+            matches.forEach(function (match) {
+                orderedMatches.push(match);
+                list.appendChild(buildFlatRow(match));
+            });
+            section.appendChild(list);
+            wrapEl.appendChild(section);
+        });
+
+        if (!wrapEl.childNodes.length) {
+            const empty = document.createElement('p');
+            empty.className = 'draw-empty';
+            empty.textContent = 'No matches in this round yet.';
+            wrapEl.appendChild(empty);
+            return;
+        }
+        mountDrawProbBars(wrapEl, orderedMatches);
+    }
+
     // Renders the bracket for a given rounds structure. When `drawOverride` is
     // supplied (pick-mode), DrawBracket is fed that DERIVED draw; the renderer is
     // untouched and never learns pick-mode exists. Default (no override) is the
@@ -389,12 +621,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const wrapEl = document.getElementById('roundMatchesWrap');
         if (!wrapEl || !currentDrawRounds.length) return;
 
-        wrapEl.innerHTML = '';
-
         if (currentDrawIsRR) {
             renderRoundList(0);
             return;
         }
+
+        if (currentDrawLayout === 'list' && mode !== 'picks') {
+            renderSlotList();
+            return;
+        }
+
+        wrapEl.innerHTML = '';
 
         const drawToRender = drawOverride || currentDrawRounds;
 
@@ -659,6 +896,10 @@ document.addEventListener('DOMContentLoaded', () => {
         currentDrawYear = parseInt(season, 10) || new Date().getFullYear();
 
         stopDrawLivePoll();   // cancel polling from any previously-open draw
+        currentDrawPayload = null;
+        drawLayoutUserSet = false;
+        currentDrawLayout = 'bracket';
+        clearDrawOrderChrome();
 
         const meta       = getTournamentMeta(tournamentName);
         const fullName   = meta.fullName || tournamentName;
@@ -697,6 +938,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 r.matches.some(m => BRACKET_ROUND_IDS.has(Number(m.roundId)))
             );
             currentDrawIsRR = !hasElimination;
+            currentDrawPayload = data;
+            currentDrawLayout = currentDrawIsRR
+                ? 'list'
+                : resolveDrawOrder(data, rounds).defaultLayout;
+            syncDrawOrderChrome();
 
             const tabsEl2 = document.getElementById('roundTabs');
 
@@ -754,6 +1000,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     btn.addEventListener('click', () => {
                         tabsEl2.querySelectorAll('.round-tab').forEach(b => b.classList.remove('active'));
                         btn.classList.add('active');
+                        if (currentDrawLayout === 'list') {
+                            const sec = document.querySelector('.draw-list-section[data-round-id="' + rid + '"]');
+                            if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            return;
+                        }
                         // Scroll the matching bracket column into view
                         const col = document.querySelector(`.db-col[data-round-id="${rid}"]`);
                         if (col) {
@@ -793,6 +1044,10 @@ document.addEventListener('DOMContentLoaded', () => {
         bracketMakerCtl = null;
         currentDrawKey = null;
         currentDrawRounds = [];
+        currentDrawPayload = null;
+        drawLayoutUserSet = false;
+        currentDrawLayout = 'bracket';
+        clearDrawOrderChrome();
     });
 
     // ── Live draw polling ─────────────────────────────────────────────────────
@@ -851,11 +1106,25 @@ document.addEventListener('DOMContentLoaded', () => {
             if (currentDrawKey !== key) return;            // switched/closed mid-fetch
             const fresh = data.rounds || [];
             const anyLive = fresh.some(r => (r.matches || []).some(m => m.isLive));
+            let changed = [];
+            let needsRender = false;
             if (fresh.length && drawSignature(fresh) !== drawSignature(currentDrawRounds)) {
-                const changed = changedRoundLabels(currentDrawRounds, fresh);
+                changed = changedRoundLabels(currentDrawRounds, fresh);
                 currentDrawRounds.length = 0;              // in-place replace (keep reference)
                 fresh.forEach(r => currentDrawRounds.push(r));
                 updateDrawSubHeader(currentDrawRounds);
+                needsRender = true;
+            }
+            currentDrawPayload = data;
+            if (!drawLayoutUserSet && !currentDrawIsRR && currentDrawRounds.length) {
+                const nextLayout = resolveDrawOrder(data, currentDrawRounds).defaultLayout;
+                if (nextLayout !== currentDrawLayout) {
+                    currentDrawLayout = nextLayout;
+                    needsRender = true;
+                }
+            }
+            syncDrawOrderChrome();
+            if (needsRender) {
                 if (bracketMakerCtl && bracketMakerCtl.renderNow) bracketMakerCtl.renderNow();
                 else renderBracketView();
                 if (changed.length) showDrawToast('Draw updated — new results in ' + changed.join(', '));
