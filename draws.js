@@ -388,7 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function resolveDrawOrder(payload, rounds) {
         try {
             if (typeof TW !== 'undefined' && TW.DrawOrder && typeof TW.DrawOrder.resolve === 'function') {
-                return TW.DrawOrder.resolve(payload, rounds);
+                return TW.DrawOrder.resolve(payload, rounds, currentDrawTour);
             }
         } catch (err) {
             console.warn('[DrawOrder]', err);
@@ -401,6 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
             listAvailable: true,
             bracketSecondary: false,
             slotLabel: '',
+            tooltip: '',
         };
     }
 
@@ -443,6 +444,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chip.className = 'draw-order-chip draw-order-chip-' + state.status;
         chip.setAttribute('role', 'status');
         chip.textContent = state.label;
+        if (state.tooltip) chip.setAttribute('title', state.tooltip);
         tools.appendChild(chip);
 
         if (state.slotLabel) {

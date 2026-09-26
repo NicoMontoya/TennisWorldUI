@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { describe, it, expect } from 'vitest';
 
@@ -86,9 +88,128 @@ describe('draw order chip', () => {
         expect(state.defaultLayout).toBe('bracket');
     });
 
-    it('does not branch on tour or event', () => {
+    it('does not special-case an event in the status rules', () => {
         const src = readFileSync(new URL('./drawOrder.js', import.meta.url), 'utf8');
-        expect(src).not.toMatch(/WTA|ATP|Guadalajara|Monterrey|Sao Paulo|16745|16746|16741/);
+        expect(src).not.toMatch(/Guadalajara|Monterrey|Sao Paulo|16745|16746|16741/);
+    });
+});
+
+describe('verified chip tooltip', () => {
+    const dated = 'Checked against the official ATP draw \u00B7 Sep 26';
+
+    it('uses tour and a plain checkedAt date when slotOrderVerification is present', () => {
+        const { rounds } = tree(true);
+        const state = DrawOrder.resolve({
+            slotOrderVerified: true,
+            slotOrderVerification: {
+                tour: 'ATP',
+                sourceHost: 'atptour.com',
+                checkedAt: '2026-09-26',
+            },
+        }, rounds, 'WTA');
+        expect(state.status).toBe('verified');
+        expect(state.label).toBe('Draw verified');
+        expect(state.tooltip).toBe(dated);
+        expect(state.tooltip).not.toMatch(/atptour|wtatennis|protennislive|sourceHost/);
+        expect(state.defaultLayout).toBe('bracket');
+    });
+
+    it('accepts a lowercase tour and does not pad the day', () => {
+        const { rounds } = tree(true);
+        const state = DrawOrder.resolve({
+            slotOrderVerified: true,
+            slotOrderVerification: { tour: ' wta ', checkedAt: '2026-01-05' },
+        }, rounds, 'ATP');
+        expect(state.tooltip).toBe('Checked against the official WTA draw \u00B7 Jan 5');
+    });
+
+    it('falls back to the draw tour with no date when the object is absent', () => {
+        const { payload, rounds } = tree(true);
+        const state = DrawOrder.resolve(payload, rounds, 'WTA');
+        expect(state.status).toBe('verified');
+        expect(state.label).toBe('Draw verified');
+        expect(state.tooltip).toBe('Checked against the official WTA draw');
+        expect(state.tooltip).not.toMatch(/\u00B7|Sep|Jan/);
+    });
+
+    it('ignores a tour other than ATP or WTA and drops the date', () => {
+        const { rounds } = tree(true);
+        const state = DrawOrder.resolve({
+            slotOrderVerified: true,
+            slotOrderVerification: {
+                tour: 'ITF',
+                sourceHost: 'https://evil.example/draw',
+                checkedAt: '2026-09-26',
+            },
+        }, rounds, 'wta');
+        expect(state.status).toBe('verified');
+        expect(state.tooltip).toBe('Checked against the official WTA draw');
+        expect(state.tooltip).not.toMatch(/ITF|evil|2026|Sep/);
+    });
+
+    it('keeps the calendar day in zones on either side of UTC', () => {
+        const file = fileURLToPath(new URL('./drawOrder.js', import.meta.url));
+        const script = `
+            const fs = require('node:fs');
+            const vm = require('node:vm');
+            const src = fs.readFileSync(${JSON.stringify(file)}, 'utf8');
+            const sandbox = { window: { TW: {} } };
+            vm.runInNewContext(src, sandbox);
+            const state = sandbox.window.TW.DrawOrder.resolve({
+                slotOrderVerified: true,
+                slotOrderVerification: { tour: 'ATP', checkedAt: '2026-09-26', sourceHost: 'not-a-host.example' },
+            }, [], 'WTA');
+            process.stdout.write(state.tooltip);
+        `;
+        for (const tz of ['Pacific/Honolulu', 'Pacific/Kiritimati', 'UTC']) {
+            const run = spawnSync(process.execPath, ['-e', script], {
+                env: { ...process.env, TZ: tz },
+                encoding: 'utf8',
+            });
+            expect(run.status, run.stderr).toBe(0);
+            expect(run.stdout).toBe(dated);
+        }
+    });
+
+    it('does not treat an instant or an impossible day as a calendar date', () => {
+        const { rounds } = tree(true);
+        const instant = DrawOrder.resolve({
+            slotOrderVerified: true,
+            slotOrderVerification: { tour: 'ATP', checkedAt: '2026-09-26T00:00:00.000Z' },
+        }, rounds, 'WTA');
+        expect(instant.tooltip).toBe('Checked against the official ATP draw');
+        const impossible = DrawOrder.resolve({
+            slotOrderVerified: true,
+            slotOrderVerification: { tour: 'ATP', checkedAt: '2026-02-31' },
+        }, rounds, 'WTA');
+        expect(impossible.tooltip).toBe('Checked against the official ATP draw');
+    });
+
+    it('leaves unchecked and wrong chips without a verification tooltip', () => {
+        const unchecked = tree(false);
+        unchecked.payload.slotOrderVerification = {
+            tour: 'ATP',
+            sourceHost: 'atptour.com',
+            checkedAt: '2026-09-26',
+        };
+        const uncheckedState = DrawOrder.resolve(unchecked.payload, unchecked.rounds, 'ATP');
+        expect(uncheckedState.status).toBe('unchecked');
+        expect(uncheckedState.label).toBe('Order unchecked');
+        expect(uncheckedState.tooltip).toBe('');
+        expect(uncheckedState.defaultLayout).toBe('bracket');
+        expect(uncheckedState.banner).toBe('');
+
+        const { rounds } = tree(true);
+        const wrongState = DrawOrder.resolve({
+            slotOrderVerified: true,
+            slotOrderMismatch: true,
+            slotOrderVerification: { tour: 'ATP', checkedAt: '2026-09-26', sourceHost: 'atptour.com' },
+        }, rounds, 'ATP');
+        expect(wrongState.status).toBe('wrong');
+        expect(wrongState.label).toBe('Bracket order wrong');
+        expect(wrongState.tooltip).toBe('');
+        expect(wrongState.defaultLayout).toBe('list');
+        expect(wrongState.banner).toMatch(/may be wrong/);
     });
 });
 
@@ -109,7 +230,11 @@ describe('adjacent-slot fail and ops mismatch', () => {
     it('verified flag does not hide a failed adjacent check', () => {
         const { payload, rounds } = tree(true);
         rounds[0].matches[0] = { ...match(0, 'A', 'E', null), roundId: 9 };
-        expect(DrawOrder.resolve(payload, rounds).status).toBe('wrong');
+        payload.slotOrderVerification = { tour: 'ATP', checkedAt: '2026-09-26', sourceHost: 'atptour.com' };
+        const state = DrawOrder.resolve(payload, rounds, 'ATP');
+        expect(state.status).toBe('wrong');
+        expect(state.tooltip).toBe('');
+        expect(state.label).toBe('Bracket order wrong');
     });
 
     it('trusts an explicit ops mismatch flag', () => {
@@ -235,6 +360,9 @@ describe('draws page wiring', () => {
             expect(body).toMatch(/textContent/);
         }
         expect(fnBody(drawsSrc, 'syncDrawOrderChrome')).toMatch(/createElement/);
+        expect(fnBody(drawsSrc, 'syncDrawOrderChrome')).toMatch(/setAttribute\('title', state\.tooltip\)/);
+        expect(fnBody(drawsSrc, 'syncDrawOrderChrome')).toMatch(/textContent = state\.label/);
+        expect(fnBody(drawsSrc, 'resolveDrawOrder')).toMatch(/currentDrawTour/);
         expect(fnBody(drawsSrc, 'buildFlatRow')).toMatch(/displayPlayerName/);
     });
 
@@ -253,10 +381,11 @@ describe('draws page wiring', () => {
         expect(third).toEqual(['https://static.cloudflareinsights.com/beacon.min.js']);
     });
 
-    it('bumps the service worker to tw-v45 and precaches drawOrder.js', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v45'/);
-        expect(swSrc).not.toMatch(/tw-v44/);
+    it('bumps the service worker to tw-v46 and precaches drawOrder.js', () => {
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v46'/);
+        expect(swSrc).not.toMatch(/tw-v45/);
         expect(swSrc).toMatch(/'\/drawOrder\.js'/);
+        expect(swSrc).toMatch(/'\/draws\.js'/);
         expect(drawsHtml).toMatch(/styles\.css\?v=tw45/);
     });
 });
