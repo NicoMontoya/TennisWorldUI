@@ -7949,7 +7949,8 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
         overflow-y: hidden;
         -webkit-overflow-scrolling: touch;
     }
-    .metric-btn { flex: 0 0 auto; }
+    .metric-btn { flex: 0 0 auto; min-height: 44px; }
+    .chip-remove { min-width: 44px; min-height: 44px; }
     .vintage-add { width: 100%; min-width: 0; flex-wrap: wrap; }
     .vintage-reset { flex: 0 0 auto; }
     .view-toggle { max-width: 100%; }

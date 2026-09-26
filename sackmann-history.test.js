@@ -52,7 +52,7 @@ describe('vintage curves legends', () => {
         expect(homeSrc).toMatch(/error: 'fetch-failed'/);
         expect(homeSrc).toMatch(/function classifyVintage/);
         expect(homeSrc).toMatch(/MAX_PLAYERS\s*=\s*12/);
-        expect(homeSrc).toMatch(/METRIC_KEYS\s*=\s*\['w', 'm', 't', 'ms', 'gs'\]/);
+        expect(homeSrc).toMatch(/METRIC_KEYS\s*=\s*\['w', 'm', 't', 'ms', 'gs', 'rk'\]/);
         expect(homeSrc).not.toMatch(/yAxisID/);
         expect(homeSrc).not.toMatch(/rate%/);
         expect(homeSrc).toMatch(/chip\.replaceChildren|createElement\('span'\)/);
@@ -82,8 +82,8 @@ describe('Time Machine weekly rankings', () => {
 });
 
 describe('service worker', () => {
-    it('precaches home.js and the history client on tw-v46', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v46'/);
+    it('precaches home.js and the history client on tw-v47', () => {
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v47'/);
         expect(swSrc).toMatch(/'\/home\.js'/);
         expect(swSrc).toMatch(/'\/rankings-history\.js'/);
         expect(swSrc).toMatch(/'\/player\.js'/);

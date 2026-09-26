@@ -8,7 +8,7 @@
 //
 // Bump CACHE_VERSION to force all clients to re-install.
 
-const CACHE_VERSION  = 'tw-v46';
+const CACHE_VERSION  = 'tw-v47';
 const SHELL_CACHE    = CACHE_VERSION + '-shell';
 const API_CACHE      = CACHE_VERSION + '-api';
 
@@ -32,6 +32,8 @@ const SHELL_ASSETS = [
     '/profile.js',
     '/player.js',
     '/home.js',
+    '/vintageRank.js',
+    '/vendor/chart.umd.min.js',
     '/live.js',
     '/scores.js',
     '/drawOrder.js',
