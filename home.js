@@ -6,6 +6,8 @@
 //       /api/player-vintage?playerKey=N|s{SackmannId}
 //       → { player, points: [{age,w,m}], totals }. Legends use 's'-prefixed keys.
 // Metric toggle re-maps the already-fetched points — no refetch.
+// Rank is the exception: it reads /api/vintage-rank-by-age (same playerKey)
+// and is cached on its own map so a 404 cannot blank the other five metrics.
 // Selection persists in localStorage (tw-vintage-players); colors follow the
 // player (slot stored with selection), never their position in the list.
 
@@ -15,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const TOUR          = 'ATP';
     const MAX_CONCURRENT = 3;
     const MAX_PLAYERS   = 12;      // cap ~8–12; default ATP top 10 is within this
-    const METRIC_KEYS   = ['w', 'm', 't', 'ms', 'gs'];
+    const METRIC_KEYS   = ['w', 'm', 't', 'ms', 'gs', 'rk'];
 
     // Categorical palette — validated (dataviz six-checks) against #ffffff and
     // #1c2333 card surfaces. Slot order is the CVD-safety mechanism; do not sort.
@@ -28,13 +30,19 @@ document.addEventListener('DOMContentLoaded', () => {
         t:  { label: 'Tournaments won',   noun: 'titles'         },
         ms: { label: 'Masters 1000 won',  noun: 'Masters titles' },
         gs: { label: 'Grand Slams won',   noun: 'Slam titles'    },
+        rk: { label: 'ATP rank (Top 200)', noun: 'rank'         },
     };
 
     let roster    = [];            // [{position,id,name,countryAcr}]
     let selection = [];            // [{id,name,slot}]
     let curves    = new Map();     // id → { player, points, totals } | { error }
+    let rankCurves = new Map();    // id → vintage-rank-by-age state (separate from curves)
     let metric    = 'w';
     let chart     = null;
+
+    function rankApi() {
+        return (typeof window !== 'undefined' && window.TW && window.TW.VintageRank) || null;
+    }
 
     const els = {
         loading: document.getElementById('vintageLoading'),
@@ -131,11 +139,74 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Rank fetches stay off the vintage queue. A 404, 429, or network error
+    // becomes a quiet empty series and never writes `curves`.
+    const rankQueue = [];
+    let rankInFlight = 0;
+    const rankQueued = new Set();
+    function enqueueRank(playerId) {
+        if (rankCurves.has(playerId) || rankQueued.has(playerId)) return;
+        rankQueued.add(playerId);
+        rankQueue.push(playerId);
+        pumpRank();
+    }
+    function pumpRank() {
+        const VR = rankApi();
+        while (rankInFlight < MAX_CONCURRENT && rankQueue.length) {
+            const id = rankQueue.shift();
+            rankInFlight++;
+            apiFetch(`/api/vintage-rank-by-age?tour=${encodeURIComponent(TOUR)}&playerKey=${encodeURIComponent(id)}`)
+                .then(data => {
+                    rankCurves.set(id, VR ? VR.classify(data) : { available: false, quiet: true, points: [], name: '' });
+                })
+                .catch(err => {
+                    const fail = VR ? VR.failureFromError(err) : { quiet: true, available: false, points: [], error: null, name: '' };
+                    const player = selection.find(p => String(p.id) === String(id));
+                    if (!fail.name && player) fail.name = player.name || '';
+                    rankCurves.set(id, fail);
+                })
+                .finally(() => {
+                    rankInFlight--;
+                    rankQueued.delete(id);
+                    if (metric === 'rk') syncChart();
+                    pumpRank();
+                });
+        }
+    }
+
     // ── Chart ─────────────────────────────────────────────────────────────────
     // Direct end-labels (player surname at each curve's last point) are the
     // secondary encoding required for a 10-series categorical palette.
     const endLabelPlugin = {
         id: 'twEndLabels',
+        // No. 1 and Top 10 guides. Drawn on the existing canvas plugin so the
+        // built-in tooltip never treats them as a series.
+        beforeDatasetsDraw(c) {
+            const opts = c.options.plugins && c.options.plugins.twEndLabels;
+            if (!opts || !opts.guides) return;
+            const VR = rankApi();
+            const yScale = c.scales && c.scales.y;
+            const area = c.chartArea;
+            if (!VR || !yScale || !area) return;
+            const drawn = (c.data.datasets || []).some(ds =>
+                (ds.data || []).some(pt => pt && pt.y != null)
+            );
+            if (!drawn) return;
+            const ctx = c.ctx;
+            ctx.save();
+            ctx.strokeStyle = chrome().muted;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([]);
+            VR.GUIDE_RANKS.forEach(rank => {
+                const py = yScale.getPixelForValue(rank);
+                if (!Number.isFinite(py)) return;
+                ctx.beginPath();
+                ctx.moveTo(area.left, py);
+                ctx.lineTo(area.right, py);
+                ctx.stroke();
+            });
+            ctx.restore();
+        },
         afterDatasetsDraw(c) {
             const { ctx } = c;
             const ink = chrome().ink;
@@ -145,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.textBaseline = 'middle';
             c.data.datasets.forEach((ds, i) => {
                 const meta = c.getDatasetMeta(i);
-                if (meta.hidden || !meta.data.length) return;
+                if (!ds.label || meta.hidden || !meta.data.length) return;
                 const last = meta.data[meta.data.length - 1];
                 const name = ds.label.split(' ').pop();
                 ctx.fillText(name, Math.min(last.x + 6, c.chartArea.right + 4), last.y);
@@ -179,16 +250,82 @@ document.addEventListener('DOMContentLoaded', () => {
             .filter(ds => ds.data.length);
     }
 
+    function collectAges() {
+        const ages = [];
+        selection.forEach(p => {
+            const cv = curves.get(p.id);
+            if (cv && !cv.error && Array.isArray(cv.points)) {
+                cv.points.forEach(pt => {
+                    const age = Number(pt && pt.age);
+                    if (Number.isFinite(age)) ages.push(age);
+                });
+            }
+            const rk = rankCurves.get(p.id);
+            if (rk && Array.isArray(rk.points)) {
+                rk.points.forEach(pt => {
+                    const age = Number(pt && pt.x);
+                    if (Number.isFinite(age)) ages.push(age);
+                });
+            }
+        });
+        return ages;
+    }
+
+    function buildRankDatasets() {
+        const VR = rankApi();
+        if (!VR) return [];
+        return selection.map(p => {
+            const rk = rankCurves.get(p.id);
+            if (!rk || !rk.points || !rk.points.some(pt => pt && pt.y != null)) return null;
+            return VR.rankDataset(rk, seriesColor(p.slot), p.name);
+        }).filter(Boolean);
+    }
+
+    function reduceMotion() {
+        return typeof matchMedia === 'function'
+            && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
     function chartOptions() {
         const ch = chrome();
-        return {
+        const VR = rankApi();
+        const rank = metric === 'rk' && !!VR;
+        const domain = rank ? VR.ageDomain(collectAges()) : null;
+        const xTicks = {
+            color: ch.muted,
+            font: { family: 'Inter', size: 11 },
+        };
+        if (rank) {
+            xTicks.precision = 0;
+            xTicks.callback = value => Number.isInteger(value) ? String(value) : '';
+        }
+        const options = {
             responsive: true,
             maintainAspectRatio: false,
             layout: { padding: { right: 76 } },   // room for direct end-labels
             interaction: { mode: 'nearest', intersect: false },
             plugins: {
                 legend: { display: false },       // the chips row is the legend
-                tooltip: {
+                twEndLabels: { guides: rank },
+                tooltip: rank ? {
+                    callbacks: {
+                        title: () => '',
+                        label: item => {
+                            const raw = item && item.raw;
+                            if (!raw || raw.y == null) return '';
+                            const ds = item.dataset || {};
+                            return VR.formatRankTooltip({
+                                name: ds.playerName || ds.label || '',
+                                age: raw.x,
+                                rank: raw.y,
+                                weeksAtRank: raw.weeksAtRank,
+                                rankedWeeks: raw.rankedWeeks,
+                                partial: raw.partial === true,
+                                asOf: ds.asOf,
+                            });
+                        },
+                    },
+                } : {
                     callbacks: {
                         title: items => items.length ? `${items[0].dataset.label}` : '',
                         label: item => `${item.parsed.x.toFixed(1)} yrs old — ${item.parsed.y} ${METRICS[metric].noun}`,
@@ -198,11 +335,28 @@ document.addEventListener('DOMContentLoaded', () => {
             scales: {
                 x: {
                     type: 'linear',
+                    min: domain ? domain.min : undefined,
+                    max: domain ? domain.max : undefined,
                     title: { display: true, text: 'Years old', color: ch.ink, font: { family: 'Inter', size: 12, weight: '500' } },
-                    ticks: { color: ch.muted, font: { family: 'Inter', size: 11 } },
+                    ticks: xTicks,
                     grid:  { color: ch.grid, drawTicks: false },
                 },
-                y: {
+                y: rank ? {
+                    type: 'logarithmic',
+                    reverse: true,
+                    min: VR.Y_MIN,
+                    max: VR.Y_MAX,
+                    title: { display: true, text: VR.Y_TITLE, color: ch.ink, font: { family: 'Inter', size: 12, weight: '500' } },
+                    ticks: {
+                        color: ch.muted,
+                        autoSkip: false,
+                        font: { family: 'Inter', size: 11 },
+                        callback: value => VR.tickLabel(value),
+                    },
+                    afterBuildTicks(scale) { VR.applyRankTicks(scale); },
+                    grid:  { color: ch.grid, drawTicks: false },
+                } : {
+                    type: 'linear',
                     beginAtZero: true,
                     title: { display: true, text: METRICS[metric].label, color: ch.ink, font: { family: 'Inter', size: 12, weight: '500' } },
                     ticks: { color: ch.muted, font: { family: 'Inter', size: 11 } },
@@ -210,6 +364,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 },
             },
         };
+        if (reduceMotion()) options.animation = false;
+        return options;
     }
 
     function emptyMessage() {
@@ -234,14 +390,37 @@ document.addEventListener('DOMContentLoaded', () => {
         els.empty.hidden = !msg;
     }
 
+    function rankView() {
+        const VR = rankApi();
+        if (!VR) return { note: '', empty: 'No career curves available.', drawable: false };
+        const states = selection.map(p => {
+            const rk = rankCurves.get(p.id);
+            if (!rk) return null;
+            if (!rk.name) return Object.assign({}, rk, { name: p.name || '' });
+            return rk;
+        }).filter(Boolean);
+        return VR.viewState(states, VR.visibleAxisAges(collectAges()));
+    }
+
     function syncChart() {
-        const datasets = buildDatasets();
-        const anyLoading = selection.some(p => !curves.has(p.id));
+        const rankMode = metric === 'rk';
+        const datasets = rankMode ? buildRankDatasets() : buildDatasets();
+        const anyLoading = rankMode
+            ? selection.some(p => !rankCurves.has(p.id))
+            : selection.some(p => !curves.has(p.id));
         if (els.loading) els.loading.style.display = (datasets.length === 0 && anyLoading) ? '' : 'none';
-        setEmpty((datasets.length === 0 && !anyLoading) ? emptyMessage() : '');
+        if (rankMode) {
+            const view = rankView();
+            setEmpty((datasets.length === 0 && !anyLoading) ? view.empty : '');
+        } else {
+            setEmpty((datasets.length === 0 && !anyLoading) ? emptyMessage() : '');
+        }
 
         if (els.canvas && typeof Chart !== 'undefined') {
-            if (!chart) {
+            const nextType = rankMode ? 'logarithmic' : 'linear';
+            const currentType = chart && chart.scales && chart.scales.y ? chart.scales.y.type : null;
+            if (!chart || currentType !== nextType) {
+                if (chart) { chart.destroy(); chart = null; }
                 chart = new Chart(els.canvas, {
                     type: 'line',
                     data: { datasets },
@@ -263,8 +442,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!els.chips) return;
         els.chips.replaceChildren();
         selection.forEach(p => {
-            const cv = curves.get(p.id);
-            const state = !cv ? ' is-loading' : (cv.error || !cv.points?.length) ? ' is-error' : '';
+            let state;
+            if (metric === 'rk') {
+                const rk = rankCurves.get(p.id);
+                if (!rk) state = ' is-loading';
+                else if (rk.quiet) state = '';
+                else if (rk.points && rk.points.some(pt => pt && pt.y != null)) state = '';
+                else state = ' is-error';
+            } else {
+                const cv = curves.get(p.id);
+                state = !cv ? ' is-loading' : (cv.error || !cv.points?.length) ? ' is-error' : '';
+            }
             const chip = document.createElement('span');
             chip.className = 'player-chip' + state;
             chip.dataset.id = String(p.id);
@@ -292,6 +480,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderNote() {
+        if (metric === 'rk') {
+            const view = rankView();
+            if (els.note) els.note.textContent = view.note;
+            return;
+        }
         const skipped = selection.filter(p => {
             const cv = curves.get(p.id);
             return cv && (cv.error === 'no-birthday' || (cv.error === undefined && !cv.points?.length));
@@ -316,6 +509,7 @@ document.addEventListener('DOMContentLoaded', () => {
         selection.push({ id: entry.id, name: entry.name, slot: freeSlot() });
         saveSelection();
         enqueue(entry.id);
+        if (metric === 'rk') enqueueRank(entry.id);
         syncChart();
     }
     function removePlayer(id) {
@@ -327,6 +521,7 @@ document.addEventListener('DOMContentLoaded', () => {
         selection = roster.slice(0, 10).map((r, i) => ({ id: r.id, name: r.name, slot: i }));
         saveSelection();
         selection.forEach(p => enqueue(p.id));
+        if (metric === 'rk') selection.forEach(p => enqueueRank(p.id));
         syncChart();
     }
 
@@ -357,7 +552,17 @@ document.addEventListener('DOMContentLoaded', () => {
             b.classList.toggle('active', active);
             b.setAttribute('aria-pressed', String(active));
         });
-        els.sub.textContent = `Cumulative ${METRICS[metric].label.toLowerCase()} by age — add or remove players to compare careers at the same age.`;
+        if (metric === 'rk') {
+            els.sub.textContent = 'ATP rank (Top 200) by age — add or remove players to compare careers at the same age.';
+            selection.forEach(p => enqueueRank(p.id));
+        } else {
+            els.sub.textContent = `Cumulative ${METRICS[metric].label.toLowerCase()} by age — add or remove players to compare careers at the same age.`;
+        }
+        if (els.canvas) {
+            els.canvas.setAttribute('aria-label', metric === 'rk'
+                ? 'Vintage curves: ATP rank by player age'
+                : 'Vintage curves: cumulative ' + METRICS[metric].label.toLowerCase() + ' by player age');
+        }
         syncChart();
     });
 
