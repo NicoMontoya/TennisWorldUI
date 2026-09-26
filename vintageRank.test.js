@@ -153,11 +153,11 @@ describe('rank empty states', () => {
         expect(view.empty).toBe('');
     });
 
-    it('treats available:false as an empty state with no line', () => {
+    it('treats other available:false responses as an empty state with no line', () => {
         const missing = Rank.classify({
             tour: 'ATP',
             available: false,
-            reason: 'rankings-not-loaded',
+            reason: 'unavailable',
             name: 'Roger Federer',
             years: [federerYear()],
         });
@@ -196,6 +196,75 @@ describe('rank empty states', () => {
         expect(homeSrc).toMatch(/rankCurves/);
         expect(homeSrc).toMatch(/\/api\/vintage-rank-by-age\?tour=\$\{encodeURIComponent\(TOUR\)\}&playerKey=\$\{encodeURIComponent\(id\)\}/);
         expect(homeSrc).toMatch(/\/api\/player-vintage\?tour=\$\{encodeURIComponent\(TOUR\)\}&playerKey=\$\{encodeURIComponent\(id\)\}/);
+    });
+});
+
+describe('not-loaded rank note', () => {
+    function missed(reason, chipName, apiName) {
+        return Object.assign(Rank.classify({
+            tour: 'ATP',
+            available: false,
+            reason: reason,
+            name: apiName === undefined ? null : apiName,
+            years: [federerYear()],
+        }), { chipName: chipName });
+    }
+
+    it('names one selected player from the chip, not a null API name', () => {
+        const state = missed('not-loaded', 'Jakub Mensik', null);
+        expect(state.name).toBe('');
+        expect(state.points).toEqual([]);
+        const view = Rank.viewState([state], [22]);
+        expect(view.drawable).toBe(false);
+        expect(view.note).toBe('No ranking history yet for Jakub Mensik.');
+        expect(Rank.noteForMetric('rk', view)).toBe(view.note);
+        expect(Rank.noteForMetric('w', view)).toBe('');
+        expect(Rank.noteForMetric('gs', view)).toBe('');
+    });
+
+    it('lists every selected player who is not loaded yet in one note', () => {
+        const states = [
+            missed('not-loaded', 'Jakub Mensik'),
+            missed('rankings-not-loaded', 'Martin Landaluce', 'Ignored API Name'),
+        ];
+        expect(Rank.viewState(states, []).note).toBe(
+            'No ranking history yet for Jakub Mensik, Martin Landaluce.'
+        );
+        expect(states[1].points).toEqual([]);
+    });
+
+    it('renders a hostile chip name as text and clears the note on deselect', () => {
+        const hostile = missed('not-loaded', HOSTILE);
+        const other = missed('rankings-not-loaded', 'Martin Landaluce');
+        let selected = [hostile, other];
+        const view = Rank.viewState(selected, []);
+        expect(view.note).toBe('No ranking history yet for ' + HOSTILE + ', Martin Landaluce.');
+        expect(view.note).not.toContain('&lt;');
+
+        const writes = [];
+        const el = {};
+        Object.defineProperty(el, 'innerHTML', {
+            set(v) { writes.push(v); },
+            get() { return undefined; },
+        });
+        let text = '';
+        Object.defineProperty(el, 'textContent', {
+            set(v) { text = String(v); },
+            get() { return text; },
+        });
+        Rank.paintText(el, Rank.noteForMetric('rk', view));
+        expect(writes).toEqual([]);
+        expect(text).toContain(HOSTILE);
+        expect(text).toBe(view.note);
+
+        selected = selected.filter(s => s.chipName !== HOSTILE);
+        expect(Rank.viewState(selected, []).note).toBe('No ranking history yet for Martin Landaluce.');
+        selected = [];
+        expect(Rank.viewState(selected, []).note).toBe('');
+        expect(Rank.noteForMetric('rk', Rank.viewState(selected, []))).toBe('');
+        expect(homeSrc).toMatch(/chipName: p\.name/);
+        expect(homeSrc).toMatch(/noteForMetric\(metric, view\)/);
+        expect(homeSrc).toMatch(/if \(metric === 'rk'\)/);
     });
 });
 

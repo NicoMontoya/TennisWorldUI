@@ -139,8 +139,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Rank fetches stay off the vintage queue. A 404, 429, or network error
-    // becomes a quiet empty series and never writes `curves`.
+    // Rank fetches stay off the vintage queue. The route is live; not-loaded
+    // means this player is not in the backfill yet. A 404, 429, or network
+    // error is only a defensive empty series and never writes `curves`.
     const rankQueue = [];
     let rankInFlight = 0;
     const rankQueued = new Set();
@@ -396,8 +397,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const states = selection.map(p => {
             const rk = rankCurves.get(p.id);
             if (!rk) return null;
-            if (!rk.name) return Object.assign({}, rk, { name: p.name || '' });
-            return rk;
+            const state = Object.assign({}, rk, { chipName: p.name || '' });
+            if (!state.name) state.name = p.name || '';
+            return state;
         }).filter(Boolean);
         return VR.viewState(states, VR.visibleAxisAges(collectAges()));
     }
@@ -482,7 +484,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderNote() {
         if (metric === 'rk') {
             const view = rankView();
-            if (els.note) els.note.textContent = view.note;
+            const VR = rankApi();
+            if (els.note) els.note.textContent = VR ? VR.noteForMetric(metric, view) : view.note;
             return;
         }
         const skipped = selection.filter(p => {

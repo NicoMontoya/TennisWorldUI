@@ -179,7 +179,7 @@
         if (data.available === false) {
             return {
                 available: false, quiet: false, wta: false, reason: reason,
-                name: name, asOf: asOf, ageAtRankingsStart: ageAt,
+                name: name, chipName: '', asOf: asOf, ageAtRankingsStart: ageAt,
                 points: [], hasGap: false, error: null,
             };
         }
@@ -224,6 +224,23 @@
         });
     }
 
+    function missingRankNote(names) {
+        var list = (names || []).filter(function (name) { return !!name; });
+        if (!list.length) return '';
+        return 'No ranking history yet for ' + list.join(', ') + '.';
+    }
+
+    function isNotLoaded(state) {
+        return !!state && state.available === false
+            && (state.reason === 'not-loaded' || state.reason === 'rankings-not-loaded');
+    }
+
+    // The roster/chip label, never the API name. A miss can send name: null.
+    function chipLabel(state) {
+        if (!state || typeof state.chipName !== 'string') return '';
+        return state.chipName;
+    }
+
     function notesFor(states, visibleAges) {
         var wta = false;
         var blank = false;
@@ -231,9 +248,15 @@
         var noHist = [];
         var noBday = [];
         var failed = [];
+        var notLoaded = [];
         (states || []).forEach(function (s) {
             if (!s || s.quiet) return;
             if (s.wta) { wta = true; return; }
+            if (isNotLoaded(s)) {
+                var label = chipLabel(s);
+                if (label) notLoaded.push(label);
+                return;
+            }
             if (s.reason === 'no-birthday') {
                 if (s.name) noBday.push(s.name);
                 return;
@@ -253,12 +276,21 @@
         });
         var notes = [];
         if (wta) notes.push(NOTE_WTA);
+        var missing = missingRankNote(notLoaded);
+        if (missing) notes.push(missing);
         if (noBday.length) notes.push('No birthdate data for ' + noBday.join(', ') + ' — skipped.');
         if (noHist.length) notes.push('No ATP ranking history for ' + noHist.join(', ') + '.');
         if (failed.length) notes.push("Couldn't load " + failed.join(', ') + '.');
         if (blank) notes.push(NOTE_BLANK);
         if (pre) notes.push(NOTE_PRE1973);
         return notes;
+    }
+
+    // Rank is the only metric that shows the not-loaded note. Other metrics
+    // keep their own copy, so switching away clears this sentence.
+    function noteForMetric(metric, view) {
+        if (metric !== 'rk' || !view) return '';
+        return view.note || '';
     }
 
     function viewState(states, visibleAges) {
@@ -349,7 +381,10 @@
         classify: classify,
         failureFromStatus: failureFromStatus,
         failureFromError: failureFromError,
+        missingRankNote: missingRankNote,
+        isNotLoaded: isNotLoaded,
         notesFor: notesFor,
+        noteForMetric: noteForMetric,
         viewState: viewState,
         paintText: paintText,
         tickLabel: tickLabel,
