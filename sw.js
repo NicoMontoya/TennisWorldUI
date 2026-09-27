@@ -8,7 +8,7 @@
 //
 // Bump CACHE_VERSION to force all clients to re-install.
 
-const CACHE_VERSION  = 'tw-v47';
+const CACHE_VERSION  = 'tw-v48';
 const SHELL_CACHE    = CACHE_VERSION + '-shell';
 const API_CACHE      = CACHE_VERSION + '-api';
 
@@ -65,6 +65,8 @@ self.addEventListener('install', function (event) {
 });
 
 // ── Activate: purge old caches ───────────────────────────────────────────────
+// Anything other than this version's shell and API caches is deleted, so a
+// CACHE_VERSION bump drops prior *-api entries (including per-user ones).
 self.addEventListener('activate', function (event) {
     event.waitUntil(
         caches.keys().then(function (keys) {
@@ -87,10 +89,13 @@ self.addEventListener('fetch', function (event) {
     if (event.request.method !== 'GET') return;
     if (url.origin !== self.location.origin && !url.hostname.includes('fonts.g')) return;
 
-    // Personal/authed endpoints: bypass the SW entirely. Their responses must
-    // never sit in the shared cache, and they carry an Authorization header the
-    // caching path must not interfere with. Offline, they fail naturally.
-    if (url.pathname.startsWith('/api/auth/') || url.pathname.startsWith('/api/favorites')) {
+    // Personal endpoints: bypass the SW entirely. The API cache is shared and
+    // keyed by URL only, so a per-user 200 must never be stored or replayed
+    // (including when a later request 401s). /api/bracket/ covers mine, save,
+    // leaders, public, and anything added later. Offline, these fail naturally.
+    if (url.pathname.startsWith('/api/auth/')
+        || url.pathname.startsWith('/api/favorites')
+        || url.pathname.startsWith('/api/bracket/')) {
         return;
     }
 

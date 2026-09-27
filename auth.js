@@ -197,6 +197,7 @@
         try { await apiPost('/api/auth/logout', {}); } catch {}
         setToken(null);
         setUser(null);
+        try { await clearSwApiCache(); } catch {}
         updateNavButton();
         broadcast();
         closeUserMenu();
@@ -406,6 +407,7 @@
             }).catch(() => {
                 setToken(null);
                 setUser(null);
+                try { clearSwApiCache(); } catch {}
                 updateNavButton();
             });
         }

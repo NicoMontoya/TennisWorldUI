@@ -319,6 +319,7 @@
         }).catch(() => {
             localStorage.removeItem('tw-auth-token');
             localStorage.removeItem('tw-auth-user');
+            try { clearSwApiCache(); } catch {}
             document.getElementById('profileContent').style.display = 'none';
             document.getElementById('profileUnauth').style.display  = 'block';
         });
