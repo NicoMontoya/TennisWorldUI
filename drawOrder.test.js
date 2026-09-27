@@ -381,8 +381,8 @@ describe('draws page wiring', () => {
         expect(third).toEqual(['https://static.cloudflareinsights.com/beacon.min.js']);
     });
 
-    it('bumps the service worker to tw-v47 and precaches drawOrder.js', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v47'/);
+    it('bumps the service worker to tw-v48 and precaches drawOrder.js', () => {
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v48'/);
         expect(swSrc).not.toMatch(/tw-v45/);
         expect(swSrc).toMatch(/'\/drawOrder\.js'/);
         expect(swSrc).toMatch(/'\/draws\.js'/);

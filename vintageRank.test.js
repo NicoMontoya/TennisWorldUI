@@ -350,7 +350,7 @@ describe('rank axis copy', () => {
 });
 
 describe('self-hosted Chart.js', () => {
-    it('serves Chart.js 4.4.0 from the repo and precaches it on tw-v47', () => {
+    it('serves Chart.js 4.4.0 from the repo and precaches it on tw-v48', () => {
         expect(Chart.version).toBe('4.4.0');
         expect(chartFile.startsWith('/*!')).toBe(true);
         expect(chartFile).toMatch(/Chart\.js v4\.4\.0/);
@@ -359,7 +359,7 @@ describe('self-hosted Chart.js', () => {
         expect(playerHtml).toMatch(/src="vendor\/chart\.umd\.min\.js"/);
         expect(indexHtml).not.toMatch(/cdn\.jsdelivr\.net\/npm\/chart\.js/);
         expect(playerHtml).not.toMatch(/cdn\.jsdelivr\.net\/npm\/chart\.js/);
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v47'/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v48'/);
         expect(swSrc).toMatch(/'\/vendor\/chart\.umd\.min\.js'/);
         expect(swSrc).toMatch(/'\/vintageRank\.js'/);
         expect(swSrc).toMatch(/'\/home\.js'/);

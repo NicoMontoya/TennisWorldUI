@@ -198,6 +198,30 @@ function formatGameScore(raw) {
     return raw.replace(' - ', '–');
 }
 
+// Drop every service-worker API cache (tw-vNN-api). That cache is shared and
+// keyed by URL, so a per-user response must not survive sign-out. Cache Storage
+// is missing or throws in Safari private mode — fail without breaking sign-out.
+function clearSwApiCache() {
+    try {
+        if (typeof caches === 'undefined' || !caches || typeof caches.keys !== 'function') {
+            return Promise.resolve();
+        }
+        return Promise.resolve()
+            .then(() => caches.keys())
+            .then((keys) => {
+                const names = (keys || []).filter((name) => typeof name === 'string' && name.endsWith('-api'));
+                return Promise.all(names.map((name) => (
+                    Promise.resolve()
+                        .then(() => caches.delete(name))
+                        .catch(() => {})
+                )));
+            })
+            .catch(() => {});
+    } catch {
+        return Promise.resolve();
+    }
+}
+
 // ── Service worker registration ───────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
