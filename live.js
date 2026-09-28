@@ -6,8 +6,10 @@
 // Idle-stops only after EMPTY_IDLE_STREAK consecutive polls with no live
 // rows — a single empty response must not kill the overlay. A Scores hub
 // reload must not call refresh() after an empty livescore response unless
-// the hub has a live or in-progress match, or the user switches tours/tabs.
-// Pauses when document.hidden; one refresh on visibilitychange → visible.
+// the hub has a live or in-progress match, or the user switches tours.
+// Pauses when document.hidden. visibilitychange → visible calls refresh(),
+// which fetches immediately and then resumes the 30s cadence. It does not
+// wait out a tick that was cleared while the tab was hidden.
 
 const LiveEngine = (() => {
     const POLL_MIN           = 30_000;
@@ -33,16 +35,16 @@ const LiveEngine = (() => {
         return allowed || 'ATP';
     }
 
-    function publish(matches) {
+    function publish(matches, updatedAt) {
         window.dispatchEvent(new CustomEvent('tw:live-update', {
-            detail: { matches, updatedAt: new Date().toISOString(), tour: currentTour() },
+            detail: { matches, updatedAt, tour: currentTour() },
         }));
     }
 
-    function publishStatus(status) {
-        window.dispatchEvent(new CustomEvent('tw:live-status', {
-            detail: { status, tour: currentTour() },
-        }));
+    function publishStatus(status, updatedAt) {
+        const detail = { status, tour: currentTour() };
+        if (updatedAt) detail.updatedAt = updatedAt;
+        window.dispatchEvent(new CustomEvent('tw:live-status', { detail }));
     }
 
     function clearTimer() {
@@ -82,14 +84,17 @@ const LiveEngine = (() => {
                 if (emptyStreak >= EMPTY_IDLE_STREAK) lastLiveList = [];
             }
 
+            const updatedAt = new Date().toISOString();
             const serialized = JSON.stringify(data);
             if (serialized !== lastMatches) {
                 lastMatches = serialized;
-                publish(list);
+                publish(list, updatedAt);
             }
 
             const overlayLive = Array.isArray(lastLiveList) && lastLiveList.some(m => m && m.isLive);
-            publishStatus(hasLive || overlayLive ? 'connected' : 'idle');
+            // Every successful fetch carries updatedAt, even when the payload
+            // is unchanged, so "Updated Ns ago" tracks the real last fetch.
+            publishStatus(hasLive || overlayLive ? 'connected' : 'idle', updatedAt);
 
             const keepPolling = running && !document.hidden && (hasLive || emptyStreak < EMPTY_IDLE_STREAK);
             if (keepPolling) {
@@ -121,12 +126,20 @@ const LiveEngine = (() => {
             clearTimer();
         },
 
+        // Drop any pending tick and fetch now. The next poll is scheduled
+        // POLL_LIVE after this request succeeds.
         refresh() {
             if (document.hidden) return;
             running = true;
             emptyStreak = 0;
             clearTimer();
             poll();
+        },
+
+        // True while a livescore request is in flight or a tick is queued.
+        // Hub reloads use this so they don't cancel the 30s cadence.
+        isPolling() {
+            return !!(running && (timerId || inFlight));
         },
 
         setTour(next) {

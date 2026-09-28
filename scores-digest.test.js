@@ -561,15 +561,18 @@ describe('hub reload does not restart an idle livescore poll', () => {
         expect(shouldRestartLiveFromHub(true, [{ status: 'Not Started' }], false)).toBe(true);
     });
 
-    it('gates ensureLiveEngine and forces refresh only for tour, tab, and retry', () => {
+    it('gates ensureLiveEngine and forces refresh for tour and retry', () => {
         expect(scoresSrc).toMatch(/function ensureLiveEngine\(/);
         expect(extractFn(scoresSrc, 'ensureLiveEngine')).toMatch(/shouldRestartLiveFromHub\(/);
         expect(extractFn(scoresSrc, 'ensureLiveEngine')).toMatch(/LiveEngine\.lastResponseHadLive\(\)/);
+        expect(extractFn(scoresSrc, 'ensureLiveEngine')).toMatch(/LiveEngine\.isPolling\(\)/);
         expect(extractFn(scoresSrc, 'ensureLiveEngine')).toMatch(/LiveEngine\.refresh\(\)/);
         expect(extractFn(scoresSrc, 'setTour')).toMatch(/loadHub\(\{\s*explicit:\s*true\s*\}\)/);
         expect(extractFn(scoresSrc, 'showListError')).toMatch(/loadHub\(\{\s*explicit:\s*true\s*\}\)/);
         const vis = scoresSrc.slice(scoresSrc.lastIndexOf("document.addEventListener('visibilitychange'"));
-        expect(vis).toMatch(/loadHub\(\{\s*explicit:\s*true\s*\}\)/);
+        expect(vis).toMatch(/LiveEngine\.refresh\(\)/);
+        expect(vis).toMatch(/loadHub\(\)/);
+        expect(vis).not.toMatch(/loadHub\(\{\s*explicit/);
         const schedule = extractFn(scoresSrc, 'scheduleHubPoll');
         expect(schedule).toMatch(/await loadHub\(\)/);
         expect(schedule).not.toMatch(/explicit/);
@@ -577,6 +580,17 @@ describe('hub reload does not restart an idle livescore poll', () => {
         expect(scoresSrc).not.toMatch(/startLiveOverlayIfNeeded/);
         expect(scoresSrc).not.toMatch(/if \(live\) LiveEngine\.start/);
         expect(scoresSrc).not.toMatch(/\.innerHTML\s*=/);
+    });
+
+    it('keeps Updated Ns ago on the last successful livescore fetch', () => {
+        const statusListener = scoresSrc.slice(scoresSrc.indexOf("addEventListener('tw:live-status'"));
+        expect(statusListener).toMatch(/if \(detail && detail\.updatedAt\) stampDigestUpdated\(detail\.updatedAt\)/);
+        expect(extractFn(scoresSrc, 'paintDigestUpdated')).toMatch(/Updated \$\{secs\}s ago/);
+        expect(extractFn(scoresSrc, 'paintDigestUpdated')).toMatch(/node\.textContent/);
+        const poll = extractFn(liveSrc, 'poll');
+        expect(poll).toMatch(/if \(serialized !== lastMatches\) \{\s*lastMatches = serialized;\s*publish\(list, updatedAt\);/);
+        expect(poll).toMatch(/publishStatus\(hasLive \|\| overlayLive \? 'connected' : 'idle', updatedAt\)/);
+        expect(poll).toMatch(/publishStatus\('disconnected'\)/);
     });
 });
 

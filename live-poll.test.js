@@ -9,6 +9,7 @@ function loadLiveEngine(initialRows = []) {
     let nextId = 1;
     let rows = initialRows;
     const calls = [];
+    const events = [];
     const documentListeners = {};
     const document = {
         hidden: false,
@@ -16,7 +17,11 @@ function loadLiveEngine(initialRows = []) {
     };
     const context = {
         document,
-        window: { dispatchEvent() {} },
+        window: {
+            dispatchEvent(ev) {
+                events.push({ type: ev.type, detail: ev.detail });
+            },
+        },
         setTimeout(fn, ms) {
             const id = nextId++;
             timers.push({ id, fn, ms, cleared: false });
@@ -61,6 +66,7 @@ function loadLiveEngine(initialRows = []) {
     return {
         engine: context.LiveEngine,
         calls,
+        events,
         pending,
         fireNext,
         flush,
@@ -86,18 +92,50 @@ describe('LiveEngine livescore polling', () => {
         expect(live.calls).toHaveLength(2);
         expect(live.pending().map(t => t.ms)).toEqual([30_000]);
 
+        const pendingTick = live.pending()[0];
         live.document.hidden = true;
         live.documentListeners.visibilitychange();
+        expect(pendingTick.cleared).toBe(true);
         expect(live.pending()).toEqual([]);
-
-        await Promise.resolve();
         expect(live.calls).toHaveLength(2);
 
         live.document.hidden = false;
         live.documentListeners.visibilitychange();
         await live.flush();
         expect(live.calls).toHaveLength(3);
+        expect(live.pending()).toHaveLength(1);
+        expect(live.pending()[0]).not.toBe(pendingTick);
         expect(live.pending().map(t => t.ms)).toEqual([30_000]);
+    });
+
+    it('fetches immediately when a visible tab still had time left on the 30s tick', async () => {
+        const live = loadLiveEngine([{ isLive: true, matchKey: 'm1' }]);
+        await live.boot();
+        const leftover = live.pending()[0];
+        expect(leftover.ms).toBe(30_000);
+
+        live.document.hidden = true;
+        live.documentListeners.visibilitychange();
+        live.document.hidden = false;
+        live.documentListeners.visibilitychange();
+        await live.flush();
+
+        expect(leftover.cleared).toBe(true);
+        expect(live.calls).toHaveLength(2);
+        expect(live.pending().map(t => t.ms)).toEqual([30_000]);
+    });
+
+    it('stamps updatedAt on every successful fetch, including an unchanged payload', async () => {
+        const live = loadLiveEngine([{ isLive: true, matchKey: 'm1' }]);
+        await live.boot();
+        await live.fireNext();
+
+        const updates = live.events.filter(e => e.type === 'tw:live-update');
+        const statuses = live.events.filter(e => e.type === 'tw:live-status' && e.detail.updatedAt);
+        expect(updates).toHaveLength(1);
+        expect(statuses).toHaveLength(2);
+        expect(statuses.every(e => typeof e.detail.updatedAt === 'string' && e.detail.updatedAt)).toBe(true);
+        expect(live.events.some(e => e.type === 'tw:live-status' && e.detail.status === 'disconnected')).toBe(false);
     });
 
     it('stops after 4 empty polls and does not schedule another', async () => {

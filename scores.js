@@ -3,7 +3,8 @@
 // ===================================
 // Primary: GET /api/hub (anonymous). Hub fixtures do not carry isLive —
 // LiveEngine overlays GET /api/livescore while a match is live or in
-// progress, and after the user switches tours or brings the tab back.
+// progress, and after the user switches tours. Bringing the tab back
+// fetches livescore immediately (LiveEngine.refresh), then every 30s.
 // Hub interval reloads do not restart an idle livescore poll. They still
 // merge last live fields onto matching matchKeys before paint so fixtures
 // cannot flash Live → Not Started.
@@ -152,8 +153,9 @@ function hubHasLiveOrInProgress(matches) {
 // Skip LiveEngine.refresh() on a hub reload once livescore has returned
 // an empty board and the hub still shows nothing on court. lastHadLive
 // null means no successful livescore response yet, so the first load
-// still starts polling. explicit covers tour changes, the tab becoming
-// visible, and Try again.
+// still starts polling. explicit covers tour changes and Try again.
+// Tab visibility fetches immediately via LiveEngine.refresh and does not
+// go through this gate.
 function shouldRestartLiveFromHub(lastHadLive, matches, explicit) {
     if (explicit) return true;
     if (hubHasLiveOrInProgress(matches)) return true;
@@ -995,7 +997,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (subEl) subEl.textContent = pageSub(anyLive(flatMatches));
     });
 
-    window.addEventListener('tw:live-status', ({ detail: { status } }) => {
+    window.addEventListener('tw:live-status', ({ detail }) => {
+        const status = detail && detail.status;
+        // Successful livescore fetches set updatedAt even when the body did
+        // not change. Failures omit it, so the label stays on the last success.
+        if (detail && detail.updatedAt) stampDigestUpdated(detail.updatedAt);
         const pill = document.getElementById('liveStatusPill');
         if (pill) {
             pill.className = `live-status-pill live-status-${status}`;
@@ -1027,6 +1033,9 @@ document.addEventListener('DOMContentLoaded', () => {
             ? LiveEngine.lastResponseHadLive()
             : null;
         if (!shouldRestartLiveFromHub(lastHadLive, matches, explicit)) return;
+        // A hub reload must not clear the 30s tick that an in-progress or
+        // just-started livescore poll already scheduled.
+        if (!explicit && typeof LiveEngine.isPolling === 'function' && LiveEngine.isPolling()) return;
         LiveEngine.refresh();
     }
 
@@ -1121,7 +1130,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.hidden) {
             stopHubPoll();
         } else {
-            loadHub({ explicit: true });
+            // Fetch livescore now. Do not mark the hub reload explicit —
+            // that would refresh again when the hub returns and reset the 30s cadence.
+            if (typeof LiveEngine !== 'undefined') LiveEngine.refresh();
+            loadHub();
             scheduleHubPoll();
         }
     });

@@ -47,5 +47,7 @@ window.addEventListener('tw:live-update', function (e) {
 });
 
 window.addEventListener('tw:live-status', function (e) {
-    TW.appStore.setState({ liveStatus: e.detail.status });
+    const patch = { liveStatus: e.detail.status };
+    if (e.detail.updatedAt) patch.lastUpdated = new Date(e.detail.updatedAt);
+    TW.appStore.setState(patch);
 });
