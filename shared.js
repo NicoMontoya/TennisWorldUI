@@ -78,7 +78,7 @@ function normalizeNavPage(pathname) {
 // Returns payload on success, throws on hard error.
 // Pass { auth: false } to force an anonymous request (no Authorization header).
 async function apiFetch(path, options = {}) {
-    const { auth, headers: optHeaders, ...fetchOpts } = options;
+    const { auth, headers: optHeaders, includeResponse, ...fetchOpts } = options;
     const token = localStorage.getItem('tw-auth-token');
     const headers = { ...(optHeaders || {}) };
     if (token && !isAnonymousPublicGet(path, options)) {
@@ -90,6 +90,9 @@ async function apiFetch(path, options = {}) {
     if (!res.ok && res.status !== 401 && res.status !== 409) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (!json.ok) throw new Error(json.error || 'API error');
+    // Livescore needs the Response so X-Fetched-At can be read. Every other
+    // caller still receives json.data only.
+    if (includeResponse) return { data: json.data, response: res };
     return json.data;
 }
 

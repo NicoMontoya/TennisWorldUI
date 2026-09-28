@@ -70,16 +70,25 @@ const LiveEngine = (() => {
         inFlight = true;
         try {
             const t = currentTour();
-            const data = await apiFetch(`/api/livescore?tour=${encodeURIComponent(t)}`, { auth: false });
+            const fetched = await apiFetch(`/api/livescore?tour=${encodeURIComponent(t)}`, {
+                auth: false,
+                includeResponse: true,
+            });
             backoffMs = POLL_MIN;
 
-            const list = typeof readLivescoreMatches === 'function'
-                ? readLivescoreMatches(data)
-                : (Array.isArray(data) ? data : []);
-            // Upstream fetch time only. A missing field stays null (not stale).
-            // Do not use the client clock — that is updatedAt, for "Updated Ns ago".
+            // Body stays a bare match array. Upstream time is only the
+            // X-Fetched-At response header — never a payload field, and never
+            // the client clock (that is updatedAt, for "Updated Ns ago").
+            const data = fetched && Object.prototype.hasOwnProperty.call(fetched, 'response')
+                ? fetched.data
+                : fetched;
+            const response = fetched && fetched.response;
+            const headerValue = response && response.headers && typeof response.headers.get === 'function'
+                ? response.headers.get('X-Fetched-At')
+                : null;
+            const list = Array.isArray(data) ? data : [];
             const fetchedAt = typeof readLivescoreFetchedAt === 'function'
-                ? readLivescoreFetchedAt(data)
+                ? readLivescoreFetchedAt(headerValue)
                 : null;
             const hasLive = list.some(m => m && m.isLive);
             lastHadLive = hasLive;
@@ -102,7 +111,7 @@ const LiveEngine = (() => {
             const overlayLive = Array.isArray(lastLiveList) && lastLiveList.some(m => m && m.isLive);
             // Every successful fetch carries updatedAt, even when the payload
             // is unchanged, so "Updated Ns ago" tracks the real last fetch.
-            // fetchedAt is the upstream timestamp, or null when the payload has none.
+            // fetchedAt is X-Fetched-At, or null when that header is missing or unusable.
             publishStatus(hasLive || overlayLive ? 'connected' : 'idle', updatedAt, fetchedAt);
 
             const keepPolling = running && !document.hidden && (hasLive || emptyStreak < EMPTY_IDLE_STREAK);

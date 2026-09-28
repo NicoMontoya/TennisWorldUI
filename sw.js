@@ -170,6 +170,8 @@ async function networkFirstWithCache(request, cacheName) {
             ? await cleanFetch(request)
             : await fetch(request);
         if (!response.ok) throw new Error('Network response not ok');
+        // Clone stores the full Response, including X-Fetched-At on
+        // /api/livescore. Do not rebuild the body without these headers.
         cache.put(request, response.clone());
         return response;
     } catch (_) {

@@ -271,6 +271,30 @@ describe('service worker bracket bypass', () => {
         }
     });
 
+    it('passes X-Fetched-At through on a livescore network response and a cache hit', async () => {
+        const header = '2026-09-28T19:12:00.000Z';
+        const body = JSON.stringify({ ok: true, data: [{ matchKey: 'm1', isLive: true }] });
+        const live = loadServiceWorker();
+        live.setNetwork(async () => new Response(body, {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'X-Fetched-At': header },
+        }));
+        const res = await live.handleFetch('/api/livescore?tour=ATP');
+        expect(res.headers.get('X-Fetched-At')).toBe(header);
+        expect(live.puts).toHaveLength(1);
+        expect(live.puts[0].response.headers.get('X-Fetched-At')).toBe(header);
+
+        const offline = loadServiceWorker();
+        offline.seed(ORIGIN + '/api/livescore?tour=ATP', new Response(body, {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'X-Fetched-At': header },
+        }));
+        offline.setNetwork(async () => { throw new Error('offline'); });
+        const cached = await offline.handleFetch('/api/livescore?tour=ATP');
+        expect(cached.headers.get('X-Fetched-At')).toBe(header);
+        expect(await cached.json()).toEqual({ ok: true, data: [{ matchKey: 'm1', isLive: true }] });
+    });
+
     it('still falls back to the API cache for a public GET when the network 401s', async () => {
         const sw = loadServiceWorker();
         const cachedBody = '{"ok":true,"data":{"from":"cache"}}';

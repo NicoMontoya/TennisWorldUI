@@ -32,7 +32,7 @@ function loadScoresHelpers() {
         'tournamentLabel', 'venueLabel', 'parseSetPair',
         'matchKeyOf', 'isFinishedStatus', 'isDelayedStatus', 'matchPhase', 'phaseLabel',
         'isLiveOrInProgressMatch', 'hubHasLiveOrInProgress', 'shouldRestartLiveFromHub',
-        'readLivescoreMatches', 'readLivescoreFetchedAt', 'isLivescoreStale', 'formatAsOfLabel',
+        'readLivescoreFetchedAt', 'isLivescoreStale', 'formatAsOfLabel',
         'pairRoundKey', 'dedupePairRoundMatches',
         'matchTimeMs', 'mergeHubMatches', 'sortFlatMatches',
         'liveByKeyFrom', 'withLiveMeta', 'mergeLiveOverlay', 'overlayMatchesForHub',
@@ -46,7 +46,7 @@ function loadScoresHelpers() {
         'function parseTour(value) { const t = String(value == null ? "" : value).trim().toUpperCase(); return t === "ATP" || t === "WTA" ? t : null; }',
     ].join('\n');
     const body = names.map(n => extractFn(scoresSrc, n)).join('\n');
-    return new Function(prelude + '\n' + body + '; return { EVENT_TYPES, CATEGORY_TABS, parseEventType, parseDigestFilter, eventTypeOf, countByEventType, hasAnyEventType, preferredCategory, matchesForCategory, tournamentLabel, venueLabel, parseSetPair, matchKeyOf, isFinishedStatus, isDelayedStatus, matchPhase, phaseLabel, isLiveOrInProgressMatch, hubHasLiveOrInProgress, shouldRestartLiveFromHub, readLivescoreMatches, readLivescoreFetchedAt, isLivescoreStale, formatAsOfLabel, STALE_LIVE_MS, STALE_LIVE_BANNER, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, withLiveMeta, mergeLiveOverlay, overlayMatchesForHub, formatMatchClock, statusText };')();
+    return new Function(prelude + '\n' + body + '; return { EVENT_TYPES, CATEGORY_TABS, parseEventType, parseDigestFilter, eventTypeOf, countByEventType, hasAnyEventType, preferredCategory, matchesForCategory, tournamentLabel, venueLabel, parseSetPair, matchKeyOf, isFinishedStatus, isDelayedStatus, matchPhase, phaseLabel, isLiveOrInProgressMatch, hubHasLiveOrInProgress, shouldRestartLiveFromHub, readLivescoreFetchedAt, isLivescoreStale, formatAsOfLabel, STALE_LIVE_MS, STALE_LIVE_BANNER, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, withLiveMeta, mergeLiveOverlay, overlayMatchesForHub, formatMatchClock, statusText };')();
 }
 
 function extractConst(src, name) {
@@ -101,7 +101,7 @@ describe('TW Security acceptance checklist', () => {
         const sharedSrc = readFileSync(new URL('./shared.js', import.meta.url), 'utf8');
         expect(sharedSrc).toMatch(/const PUBLIC_GET_PATHS = \['\/api\/hub', '\/api\/livescore', '\/api\/calendar'\]/);
         expect(scoresSrc).toMatch(/apiFetch\(`\/api\/hub\?tour=\$\{encodeURIComponent\(tour\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
-        expect(liveSrc).toMatch(/apiFetch\(`\/api\/livescore\?tour=\$\{encodeURIComponent\(t\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
+        expect(liveSrc).toMatch(/apiFetch\(`\/api\/livescore\?tour=\$\{encodeURIComponent\(t\)\}`,\s*\{\s*auth:\s*false,\s*includeResponse:\s*true,?\s*\}\)/);
         expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v49'/);
         expect(swSrc).not.toMatch(/tw-v43/);
         expect(swSrc).not.toMatch(/peakOverlap/);
@@ -593,7 +593,9 @@ describe('hub reload does not restart an idle livescore poll', () => {
         const poll = extractFn(liveSrc, 'poll');
         expect(poll).toMatch(/if \(serialized !== lastMatches\) \{\s*lastMatches = serialized;\s*publish\(list, updatedAt, fetchedAt\);/);
         expect(poll).toMatch(/publishStatus\(hasLive \|\| overlayLive \? 'connected' : 'idle', updatedAt, fetchedAt\)/);
-        expect(poll).toMatch(/readLivescoreFetchedAt\(data\)/);
+        expect(poll).toMatch(/response\.headers\.get\('X-Fetched-At'\)/);
+        expect(poll).toMatch(/readLivescoreFetchedAt\(headerValue\)/);
+        expect(poll).not.toMatch(/data\.fetchedAt|payload\.fetchedAt/);
         expect(poll).toMatch(/publishStatus\('disconnected'\)/);
         expect(poll).not.toMatch(/fetchedAt = new Date\(/);
     });
@@ -605,36 +607,35 @@ describe('stale live scores', () => {
         STALE_LIVE_BANNER,
         isLivescoreStale,
         readLivescoreFetchedAt,
-        readLivescoreMatches,
         formatAsOfLabel,
     } = loadScoresHelpers();
 
     const now = Date.parse('2026-09-28T20:00:00.000Z');
 
-    function isoAge(ms) {
+    function headerAge(ms) {
         return new Date(now - ms).toISOString();
     }
 
-    it('treats 4:59 as fresh, 5:01 as stale, and null as not stale', () => {
+    it('treats an X-Fetched-At header 4:59 old as fresh, 5:01 as stale, and missing or garbage as not stale', () => {
         expect(STALE_LIVE_MS).toBe(5 * 60 * 1000);
-        expect(isLivescoreStale(isoAge((4 * 60 + 59) * 1000), now)).toBe(false);
-        expect(isLivescoreStale(isoAge(5 * 60 * 1000), now)).toBe(false);
-        expect(isLivescoreStale(isoAge((5 * 60 + 1) * 1000), now)).toBe(true);
-        expect(isLivescoreStale(null, now)).toBe(false);
-        expect(isLivescoreStale(undefined, now)).toBe(false);
-        expect(isLivescoreStale('', now)).toBe(false);
-    });
-
-    it('reads only payload.fetchedAt and ignores match start time and arrival time', () => {
-        const start = '2020-01-01T00:00:00.000Z';
-        expect(readLivescoreFetchedAt([{ isLive: true, date: start, updatedAt: start }])).toBe(null);
+        const fresh = readLivescoreFetchedAt(headerAge((4 * 60 + 59) * 1000));
+        const exact = readLivescoreFetchedAt(headerAge(5 * 60 * 1000));
+        const stale = readLivescoreFetchedAt(headerAge((5 * 60 + 1) * 1000));
+        const ahead = readLivescoreFetchedAt(new Date(now + (5 * 60 + 1) * 1000).toISOString());
+        expect(isLivescoreStale(fresh, now)).toBe(false);
+        expect(isLivescoreStale(exact, now)).toBe(false);
+        expect(isLivescoreStale(stale, now)).toBe(true);
+        expect(isLivescoreStale(ahead, now)).toBe(false);
         expect(readLivescoreFetchedAt(null)).toBe(null);
-        expect(readLivescoreFetchedAt({ matches: [{ isLive: true }] })).toBe(null);
-        expect(readLivescoreFetchedAt({ fetchedAt: 'not-a-time', matches: [] })).toBe(null);
-        const fetchedAt = '2026-09-28T19:12:00.000Z';
-        expect(readLivescoreFetchedAt({ fetchedAt, matches: [{ isLive: true, date: start }] })).toBe(fetchedAt);
-        expect(readLivescoreMatches([{ matchKey: 'a' }])).toEqual([{ matchKey: 'a' }]);
-        expect(readLivescoreMatches({ fetchedAt, matches: [{ matchKey: 'a' }] })).toEqual([{ matchKey: 'a' }]);
+        expect(readLivescoreFetchedAt(undefined)).toBe(null);
+        expect(readLivescoreFetchedAt('')).toBe(null);
+        expect(readLivescoreFetchedAt('   ')).toBe(null);
+        expect(readLivescoreFetchedAt('not-a-time')).toBe(null);
+        expect(isLivescoreStale(null, now)).toBe(false);
+        expect(isLivescoreStale(readLivescoreFetchedAt('not-a-time'), now)).toBe(false);
+        const headers = new Headers({ 'X-Fetched-At': fresh });
+        expect(readLivescoreFetchedAt(headers.get('X-Fetched-At'))).toBe(fresh);
+        expect(scoresSrc).not.toMatch(/payload\.fetchedAt|data\.fetchedAt|readLivescoreMatches/);
     });
 
     it('formats the as-of label in local hour and minute', () => {

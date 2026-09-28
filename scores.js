@@ -162,24 +162,17 @@ function shouldRestartLiveFromHub(lastHadLive, matches, explicit) {
     return lastHadLive !== false;
 }
 
-// Upstream fetch time on the livescore payload. Today's API returns a bare
-// match array, which has no fetch timestamp (match `date` is the start).
-// null means not stale — never substitute the client arrival time.
+// Upstream fetch time is the X-Fetched-At response header (ISO 8601 UTC).
+// The livescore body stays a bare array. Missing, blank, or unparseable
+// means not stale — never substitute the client arrival time.
 const STALE_LIVE_MS = 5 * 60 * 1000;
 const STALE_LIVE_BANNER = 'Live scores are temporarily unavailable. Results and draws are up to date.';
 
-function readLivescoreMatches(payload) {
-    if (Array.isArray(payload)) return payload;
-    if (payload && Array.isArray(payload.matches)) return payload.matches;
-    return [];
-}
-
-function readLivescoreFetchedAt(payload) {
-    if (!payload || Array.isArray(payload)) return null;
-    const raw = payload.fetchedAt;
-    if (typeof raw !== 'string') return null;
-    const trimmed = raw.trim();
-    if (!trimmed || Number.isNaN(Date.parse(trimmed))) return null;
+function readLivescoreFetchedAt(headerValue) {
+    if (typeof headerValue !== 'string') return null;
+    const trimmed = headerValue.trim();
+    if (!trimmed) return null;
+    if (Number.isNaN(Date.parse(trimmed))) return null;
     return trimmed;
 }
 
@@ -188,6 +181,8 @@ function isLivescoreStale(fetchedAt, nowMs) {
     const t = Date.parse(fetchedAt);
     if (Number.isNaN(t)) return false;
     const now = typeof nowMs === 'number' ? nowMs : Date.now();
+    // More than 5 minutes ahead is clock skew, not stale data.
+    if (t - now > STALE_LIVE_MS) return false;
     return (now - t) > STALE_LIVE_MS;
 }
 
