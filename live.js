@@ -35,15 +35,16 @@ const LiveEngine = (() => {
         return allowed || 'ATP';
     }
 
-    function publish(matches, updatedAt) {
+    function publish(matches, updatedAt, fetchedAt) {
         window.dispatchEvent(new CustomEvent('tw:live-update', {
-            detail: { matches, updatedAt, tour: currentTour() },
+            detail: { matches, updatedAt, fetchedAt: fetchedAt || null, tour: currentTour() },
         }));
     }
 
-    function publishStatus(status, updatedAt) {
+    function publishStatus(status, updatedAt, fetchedAt) {
         const detail = { status, tour: currentTour() };
         if (updatedAt) detail.updatedAt = updatedAt;
+        if (arguments.length > 2) detail.fetchedAt = fetchedAt || null;
         window.dispatchEvent(new CustomEvent('tw:live-status', { detail }));
     }
 
@@ -72,7 +73,14 @@ const LiveEngine = (() => {
             const data = await apiFetch(`/api/livescore?tour=${encodeURIComponent(t)}`, { auth: false });
             backoffMs = POLL_MIN;
 
-            const list = Array.isArray(data) ? data : [];
+            const list = typeof readLivescoreMatches === 'function'
+                ? readLivescoreMatches(data)
+                : (Array.isArray(data) ? data : []);
+            // Upstream fetch time only. A missing field stays null (not stale).
+            // Do not use the client clock — that is updatedAt, for "Updated Ns ago".
+            const fetchedAt = typeof readLivescoreFetchedAt === 'function'
+                ? readLivescoreFetchedAt(data)
+                : null;
             const hasLive = list.some(m => m && m.isLive);
             lastHadLive = hasLive;
 
@@ -88,13 +96,14 @@ const LiveEngine = (() => {
             const serialized = JSON.stringify(data);
             if (serialized !== lastMatches) {
                 lastMatches = serialized;
-                publish(list, updatedAt);
+                publish(list, updatedAt, fetchedAt);
             }
 
             const overlayLive = Array.isArray(lastLiveList) && lastLiveList.some(m => m && m.isLive);
             // Every successful fetch carries updatedAt, even when the payload
             // is unchanged, so "Updated Ns ago" tracks the real last fetch.
-            publishStatus(hasLive || overlayLive ? 'connected' : 'idle', updatedAt);
+            // fetchedAt is the upstream timestamp, or null when the payload has none.
+            publishStatus(hasLive || overlayLive ? 'connected' : 'idle', updatedAt, fetchedAt);
 
             const keepPolling = running && !document.hidden && (hasLive || emptyStreak < EMPTY_IDLE_STREAK);
             if (keepPolling) {

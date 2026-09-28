@@ -162,6 +162,45 @@ function shouldRestartLiveFromHub(lastHadLive, matches, explicit) {
     return lastHadLive !== false;
 }
 
+// Upstream fetch time on the livescore payload. Today's API returns a bare
+// match array, which has no fetch timestamp (match `date` is the start).
+// null means not stale — never substitute the client arrival time.
+const STALE_LIVE_MS = 5 * 60 * 1000;
+const STALE_LIVE_BANNER = 'Live scores are temporarily unavailable. Results and draws are up to date.';
+
+function readLivescoreMatches(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (payload && Array.isArray(payload.matches)) return payload.matches;
+    return [];
+}
+
+function readLivescoreFetchedAt(payload) {
+    if (!payload || Array.isArray(payload)) return null;
+    const raw = payload.fetchedAt;
+    if (typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    if (!trimmed || Number.isNaN(Date.parse(trimmed))) return null;
+    return trimmed;
+}
+
+function isLivescoreStale(fetchedAt, nowMs) {
+    if (fetchedAt == null || fetchedAt === '') return false;
+    const t = Date.parse(fetchedAt);
+    if (Number.isNaN(t)) return false;
+    const now = typeof nowMs === 'number' ? nowMs : Date.now();
+    return (now - t) > STALE_LIVE_MS;
+}
+
+function formatAsOfLabel(fetchedAt) {
+    const t = Date.parse(fetchedAt);
+    if (Number.isNaN(t)) return '';
+    const time = new Date(t).toLocaleTimeString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+    return `as of ${time}`;
+}
+
 function phaseLabel(m) {
     const phase = matchPhase(m);
     if (phase === 'live') return 'Live';
@@ -374,6 +413,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let categoryFilter = null;
     let lastUpdatedAt = null;
     let updatedTimer = null;
+    let livescoreFetchedAt = null;
+    let lastLiveStatus = 'idle';
     let listMounted = false;
 
     const params = new URLSearchParams(window.location.search);
@@ -691,12 +732,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderMatchRow(m) {
-        const isDone = matchPhase(m) === 'finished';
-        const isLive = !!m.isLive;
-        const key    = matchKeyOf(m);
         const phase  = matchPhase(m);
+        const isDone = phase === 'finished';
+        const showLive = phase === 'live' && !isLivescoreStale(livescoreFetchedAt);
+        const key    = matchKeyOf(m);
 
-        const card = el('article', 'smc smc-' + phase + (isLive ? ' smc-is-live' : '') + (isDone ? ' smc-is-done' : ''));
+        const card = el('article', 'smc smc-' + phase + (showLive ? ' smc-is-live' : '') + (isDone ? ' smc-is-done' : ''));
         if (key) card.dataset.matchKey = key;
         card.dataset.phase = phase;
 
@@ -737,13 +778,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function paintStatus(badge, m) {
+        if (!badge) return;
         const phase = matchPhase(m);
-        badge.className = 'smc-badge smc-badge-' + phase;
         const label = badge.querySelector('.smc-badge-label');
-        if (label) {
-            label.textContent = statusText(m);
-        }
+        const staleLive = phase === 'live' && isLivescoreStale(livescoreFetchedAt);
         badge.hidden = false;
+        if (staleLive) {
+            badge.className = 'smc-badge smc-badge-stale';
+            if (label) label.textContent = formatAsOfLabel(livescoreFetchedAt);
+            return;
+        }
+        badge.className = 'smc-badge smc-badge-' + phase;
+        if (label) label.textContent = statusText(m);
     }
 
     function paintWinner(card, m) {
@@ -836,11 +882,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!badge || !sets || !game) return;
 
         const phase = matchPhase(m);
-        const isLive = phase === 'live';
+        const showLive = phase === 'live' && !isLivescoreStale(livescoreFetchedAt);
         const isDone = phase === 'finished';
         row.classList.remove('smc-live', 'smc-upcoming', 'smc-delayed', 'smc-finished', 'smc-is-live', 'smc-is-done');
         row.classList.add('smc', 'smc-' + phase);
-        row.classList.toggle('smc-is-live', isLive);
+        row.classList.toggle('smc-is-live', showLive);
         row.classList.toggle('smc-is-done', isDone);
         row.dataset.phase = phase;
 
@@ -889,24 +935,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const sets = row.querySelector('.smc-sets');
         const game = row.querySelector('.smc-game');
         const badge = row.querySelector('.smc-badge');
-        const label = row.querySelector('.smc-badge-label');
         const phase = matchPhase(live);
-        const isLive = phase === 'live';
+        const showLive = phase === 'live' && !isLivescoreStale(livescoreFetchedAt);
         const isDone = phase === 'finished';
 
         row.classList.remove('smc-live', 'smc-upcoming', 'smc-delayed', 'smc-finished', 'smc-is-live', 'smc-is-done');
         row.classList.add('smc', 'smc-' + phase);
-        row.classList.toggle('smc-is-live', isLive);
+        row.classList.toggle('smc-is-live', showLive);
         row.classList.toggle('smc-is-done', isDone);
         row.dataset.phase = phase;
 
-        if (badge) {
-            badge.className = 'smc-badge smc-badge-' + phase;
-            badge.hidden = false;
-        }
-        if (label) {
-            label.textContent = statusText(live);
-        }
+        paintStatus(badge, live);
 
         paintSetColumns(sets, live, { flash });
         const nextGame = gameText(live);
@@ -914,6 +953,45 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (game) game.textContent = nextGame;
         if (game) game.hidden = !nextGame;
         paintWinner(row, live);
+    }
+
+    function paintStaleBanner(stale) {
+        const host = document.querySelector('.scores-digest .hub-container');
+        const existing = document.getElementById('scoresStaleBanner');
+        if (!stale) {
+            if (existing) existing.remove();
+            return;
+        }
+        const banner = existing || el('p', 'scores-stale-banner');
+        banner.id = 'scoresStaleBanner';
+        banner.setAttribute('role', 'status');
+        banner.textContent = STALE_LIVE_BANNER;
+        if (!existing && host) host.insertBefore(banner, host.firstChild);
+    }
+
+    function syncStaleLiveView() {
+        const stale = isLivescoreStale(livescoreFetchedAt);
+        paintStaleBanner(stale);
+        const pill = document.getElementById('liveStatusPill');
+        if (pill) {
+            pill.hidden = stale;
+            if (!stale) {
+                pill.className = `live-status-pill live-status-${lastLiveStatus}`;
+                pill.textContent = lastLiveStatus === 'connected' ? '● Live'
+                    : lastLiveStatus === 'idle' ? 'No live matches'
+                    : '⚠ Reconnecting…';
+            }
+        }
+        setScoresNavLive(!stale && lastLiveStatus === 'connected');
+        document.querySelectorAll('#scoresList .smc[data-match-key]').forEach(row => {
+            const match = flatMatches.find(m => matchKeyOf(m) === row.dataset.matchKey);
+            if (match) paintRow(row, match, { flash: false });
+        });
+    }
+
+    function noteLivescoreFetchedAt(detail) {
+        if (!detail || !Object.prototype.hasOwnProperty.call(detail, 'fetchedAt')) return;
+        livescoreFetchedAt = detail.fetchedAt || null;
     }
 
     function stampDigestUpdated(iso) {
@@ -955,6 +1033,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Live updates: patch score cells by matchKey, do not remount ────────
     window.addEventListener('tw:live-update', ({ detail }) => {
         const matches = detail?.matches || [];
+        noteLivescoreFetchedAt(detail);
         stampDigestUpdated(detail?.updatedAt);
 
         const byKey = new Map();
@@ -995,21 +1074,17 @@ document.addEventListener('DOMContentLoaded', () => {
         paintCategoryTabs(flatMatches);
         const subEl = document.getElementById('hubPageSub');
         if (subEl) subEl.textContent = pageSub(anyLive(flatMatches));
+        syncStaleLiveView();
     });
 
     window.addEventListener('tw:live-status', ({ detail }) => {
         const status = detail && detail.status;
+        if (status) lastLiveStatus = status;
+        noteLivescoreFetchedAt(detail);
         // Successful livescore fetches set updatedAt even when the body did
         // not change. Failures omit it, so the label stays on the last success.
         if (detail && detail.updatedAt) stampDigestUpdated(detail.updatedAt);
-        const pill = document.getElementById('liveStatusPill');
-        if (pill) {
-            pill.className = `live-status-pill live-status-${status}`;
-            pill.textContent = status === 'connected' ? '● Live'
-                : status === 'idle'                   ? 'No live matches'
-                : '⚠ Reconnecting…';
-        }
-        setScoresNavLive(status === 'connected');
+        syncStaleLiveView();
     });
 
     function showListError(list) {
@@ -1127,6 +1202,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof LiveEngine !== 'undefined') LiveEngine.setTour(currentTour);
 
     document.addEventListener('visibilitychange', () => {
+        syncStaleLiveView();
         if (document.hidden) {
             stopHubPoll();
         } else {

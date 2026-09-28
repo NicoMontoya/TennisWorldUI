@@ -32,6 +32,7 @@ function loadScoresHelpers() {
         'tournamentLabel', 'venueLabel', 'parseSetPair',
         'matchKeyOf', 'isFinishedStatus', 'isDelayedStatus', 'matchPhase', 'phaseLabel',
         'isLiveOrInProgressMatch', 'hubHasLiveOrInProgress', 'shouldRestartLiveFromHub',
+        'readLivescoreMatches', 'readLivescoreFetchedAt', 'isLivescoreStale', 'formatAsOfLabel',
         'pairRoundKey', 'dedupePairRoundMatches',
         'matchTimeMs', 'mergeHubMatches', 'sortFlatMatches',
         'liveByKeyFrom', 'withLiveMeta', 'mergeLiveOverlay', 'overlayMatchesForHub',
@@ -40,10 +41,12 @@ function loadScoresHelpers() {
     const prelude = [
         extractConst(scoresSrc, 'EVENT_TYPES'),
         extractConst(scoresSrc, 'CATEGORY_TABS'),
+        extractConst(scoresSrc, 'STALE_LIVE_MS'),
+        extractConst(scoresSrc, 'STALE_LIVE_BANNER'),
         'function parseTour(value) { const t = String(value == null ? "" : value).trim().toUpperCase(); return t === "ATP" || t === "WTA" ? t : null; }',
     ].join('\n');
     const body = names.map(n => extractFn(scoresSrc, n)).join('\n');
-    return new Function(prelude + '\n' + body + '; return { EVENT_TYPES, CATEGORY_TABS, parseEventType, parseDigestFilter, eventTypeOf, countByEventType, hasAnyEventType, preferredCategory, matchesForCategory, tournamentLabel, venueLabel, parseSetPair, matchKeyOf, isFinishedStatus, isDelayedStatus, matchPhase, phaseLabel, isLiveOrInProgressMatch, hubHasLiveOrInProgress, shouldRestartLiveFromHub, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, withLiveMeta, mergeLiveOverlay, overlayMatchesForHub, formatMatchClock, statusText };')();
+    return new Function(prelude + '\n' + body + '; return { EVENT_TYPES, CATEGORY_TABS, parseEventType, parseDigestFilter, eventTypeOf, countByEventType, hasAnyEventType, preferredCategory, matchesForCategory, tournamentLabel, venueLabel, parseSetPair, matchKeyOf, isFinishedStatus, isDelayedStatus, matchPhase, phaseLabel, isLiveOrInProgressMatch, hubHasLiveOrInProgress, shouldRestartLiveFromHub, readLivescoreMatches, readLivescoreFetchedAt, isLivescoreStale, formatAsOfLabel, STALE_LIVE_MS, STALE_LIVE_BANNER, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, withLiveMeta, mergeLiveOverlay, overlayMatchesForHub, formatMatchClock, statusText };')();
 }
 
 function extractConst(src, name) {
@@ -588,9 +591,77 @@ describe('hub reload does not restart an idle livescore poll', () => {
         expect(extractFn(scoresSrc, 'paintDigestUpdated')).toMatch(/Updated \$\{secs\}s ago/);
         expect(extractFn(scoresSrc, 'paintDigestUpdated')).toMatch(/node\.textContent/);
         const poll = extractFn(liveSrc, 'poll');
-        expect(poll).toMatch(/if \(serialized !== lastMatches\) \{\s*lastMatches = serialized;\s*publish\(list, updatedAt\);/);
-        expect(poll).toMatch(/publishStatus\(hasLive \|\| overlayLive \? 'connected' : 'idle', updatedAt\)/);
+        expect(poll).toMatch(/if \(serialized !== lastMatches\) \{\s*lastMatches = serialized;\s*publish\(list, updatedAt, fetchedAt\);/);
+        expect(poll).toMatch(/publishStatus\(hasLive \|\| overlayLive \? 'connected' : 'idle', updatedAt, fetchedAt\)/);
+        expect(poll).toMatch(/readLivescoreFetchedAt\(data\)/);
         expect(poll).toMatch(/publishStatus\('disconnected'\)/);
+        expect(poll).not.toMatch(/fetchedAt = new Date\(/);
+    });
+});
+
+describe('stale live scores', () => {
+    const {
+        STALE_LIVE_MS,
+        STALE_LIVE_BANNER,
+        isLivescoreStale,
+        readLivescoreFetchedAt,
+        readLivescoreMatches,
+        formatAsOfLabel,
+    } = loadScoresHelpers();
+
+    const now = Date.parse('2026-09-28T20:00:00.000Z');
+
+    function isoAge(ms) {
+        return new Date(now - ms).toISOString();
+    }
+
+    it('treats 4:59 as fresh, 5:01 as stale, and null as not stale', () => {
+        expect(STALE_LIVE_MS).toBe(5 * 60 * 1000);
+        expect(isLivescoreStale(isoAge((4 * 60 + 59) * 1000), now)).toBe(false);
+        expect(isLivescoreStale(isoAge(5 * 60 * 1000), now)).toBe(false);
+        expect(isLivescoreStale(isoAge((5 * 60 + 1) * 1000), now)).toBe(true);
+        expect(isLivescoreStale(null, now)).toBe(false);
+        expect(isLivescoreStale(undefined, now)).toBe(false);
+        expect(isLivescoreStale('', now)).toBe(false);
+    });
+
+    it('reads only payload.fetchedAt and ignores match start time and arrival time', () => {
+        const start = '2020-01-01T00:00:00.000Z';
+        expect(readLivescoreFetchedAt([{ isLive: true, date: start, updatedAt: start }])).toBe(null);
+        expect(readLivescoreFetchedAt(null)).toBe(null);
+        expect(readLivescoreFetchedAt({ matches: [{ isLive: true }] })).toBe(null);
+        expect(readLivescoreFetchedAt({ fetchedAt: 'not-a-time', matches: [] })).toBe(null);
+        const fetchedAt = '2026-09-28T19:12:00.000Z';
+        expect(readLivescoreFetchedAt({ fetchedAt, matches: [{ isLive: true, date: start }] })).toBe(fetchedAt);
+        expect(readLivescoreMatches([{ matchKey: 'a' }])).toEqual([{ matchKey: 'a' }]);
+        expect(readLivescoreMatches({ fetchedAt, matches: [{ matchKey: 'a' }] })).toEqual([{ matchKey: 'a' }]);
+    });
+
+    it('formats the as-of label in local hour and minute', () => {
+        const fetchedAt = '2026-09-28T19:12:00.000Z';
+        const time = new Date(fetchedAt).toLocaleTimeString(undefined, {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+        expect(formatAsOfLabel(fetchedAt)).toBe(`as of ${time}`);
+        expect(extractFn(scoresSrc, 'formatAsOfLabel')).toMatch(/toLocaleTimeString\(undefined, \{\s*hour: 'numeric',\s*minute: '2-digit',\s*\}\)/);
+    });
+
+    it('uses the single neutral banner line and textContent', () => {
+        expect(STALE_LIVE_BANNER).toBe('Live scores are temporarily unavailable. Results and draws are up to date.');
+        const banner = extractFn(scoresSrc, 'paintStaleBanner');
+        expect(banner).toMatch(/banner\.textContent = STALE_LIVE_BANNER/);
+        expect(banner).not.toMatch(/innerHTML/);
+        expect(banner).not.toMatch(/quota|RapidAPI|hard-stop|hard stop/i);
+        expect(scoresSrc).toMatch(/function syncStaleLiveView\(/);
+        const vis = scoresSrc.slice(scoresSrc.lastIndexOf("document.addEventListener('visibilitychange'"));
+        expect(vis).toMatch(/syncStaleLiveView\(\)/);
+        const status = scoresSrc.slice(scoresSrc.indexOf("addEventListener('tw:live-status'"));
+        expect(status).toMatch(/noteLivescoreFetchedAt\(detail\)/);
+        expect(status).toMatch(/syncStaleLiveView\(\)/);
+        expect(extractFn(scoresSrc, 'paintStatus')).toMatch(/formatAsOfLabel\(livescoreFetchedAt\)/);
+        expect(extractFn(scoresSrc, 'paintStatus')).toMatch(/label\.textContent = formatAsOfLabel/);
+        expect(extractFn(scoresSrc, 'paintStatus')).toMatch(/smc-badge-stale/);
     });
 });
 
