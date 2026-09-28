@@ -186,14 +186,43 @@ function isLivescoreStale(fetchedAt, nowMs) {
     return (now - t) > STALE_LIVE_MS;
 }
 
-function formatAsOfLabel(fetchedAt) {
+// Empty livescore boards use the normal empty state. Header age alone
+// never decides the banner — only a non-empty list can be stale.
+function shouldShowStaleLive(matchCount, fetchedAt, nowMs) {
+    const count = Number(matchCount);
+    if (!Number.isFinite(count) || count <= 0) return false;
+    return isLivescoreStale(fetchedAt, nowMs);
+}
+
+// Today: "as of 3:12 PM". An earlier day within 7 days includes the date.
+// Older than 7 days, or the 1970 placeholder, has no as-of label.
+const AS_OF_LABEL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function formatAsOfLabel(fetchedAt, nowMs) {
     const t = Date.parse(fetchedAt);
-    if (Number.isNaN(t)) return '';
-    const time = new Date(t).toLocaleTimeString(undefined, {
+    if (Number.isNaN(t) || t <= 0) return '';
+    const when = new Date(t);
+    if (when.getFullYear() < 2000) return '';
+    const now = typeof nowMs === 'number' ? nowMs : Date.now();
+    if (now - t > AS_OF_LABEL_MS) return '';
+    const today = new Date(now);
+    const sameDay = when.getFullYear() === today.getFullYear()
+        && when.getMonth() === today.getMonth()
+        && when.getDate() === today.getDate();
+    if (sameDay) {
+        const time = when.toLocaleTimeString(undefined, {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+        return `as of ${time}`;
+    }
+    const stamp = when.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
         hour: 'numeric',
         minute: '2-digit',
     });
-    return `as of ${time}`;
+    return `as of ${stamp}`;
 }
 
 function phaseLabel(m) {
@@ -409,6 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let lastUpdatedAt = null;
     let updatedTimer = null;
     let livescoreFetchedAt = null;
+    let livescoreCount = 0;
     let lastLiveStatus = 'idle';
     let listMounted = false;
 
@@ -729,7 +759,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderMatchRow(m) {
         const phase  = matchPhase(m);
         const isDone = phase === 'finished';
-        const showLive = phase === 'live' && !isLivescoreStale(livescoreFetchedAt);
+        const showLive = phase === 'live' && !shouldShowStaleLive(livescoreCount, livescoreFetchedAt);
         const key    = matchKeyOf(m);
 
         const card = el('article', 'smc smc-' + phase + (showLive ? ' smc-is-live' : '') + (isDone ? ' smc-is-done' : ''));
@@ -776,13 +806,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!badge) return;
         const phase = matchPhase(m);
         const label = badge.querySelector('.smc-badge-label');
-        const staleLive = phase === 'live' && isLivescoreStale(livescoreFetchedAt);
-        badge.hidden = false;
+        const staleLive = phase === 'live' && shouldShowStaleLive(livescoreCount, livescoreFetchedAt);
         if (staleLive) {
+            const asOf = formatAsOfLabel(livescoreFetchedAt);
             badge.className = 'smc-badge smc-badge-stale';
-            if (label) label.textContent = formatAsOfLabel(livescoreFetchedAt);
+            if (!asOf) {
+                badge.hidden = true;
+                if (label) label.textContent = '';
+                return;
+            }
+            badge.hidden = false;
+            if (label) label.textContent = asOf;
             return;
         }
+        badge.hidden = false;
         badge.className = 'smc-badge smc-badge-' + phase;
         if (label) label.textContent = statusText(m);
     }
@@ -877,7 +914,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!badge || !sets || !game) return;
 
         const phase = matchPhase(m);
-        const showLive = phase === 'live' && !isLivescoreStale(livescoreFetchedAt);
+        const showLive = phase === 'live' && !shouldShowStaleLive(livescoreCount, livescoreFetchedAt);
         const isDone = phase === 'finished';
         row.classList.remove('smc-live', 'smc-upcoming', 'smc-delayed', 'smc-finished', 'smc-is-live', 'smc-is-done');
         row.classList.add('smc', 'smc-' + phase);
@@ -931,7 +968,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const game = row.querySelector('.smc-game');
         const badge = row.querySelector('.smc-badge');
         const phase = matchPhase(live);
-        const showLive = phase === 'live' && !isLivescoreStale(livescoreFetchedAt);
+        const showLive = phase === 'live' && !shouldShowStaleLive(livescoreCount, livescoreFetchedAt);
         const isDone = phase === 'finished';
 
         row.classList.remove('smc-live', 'smc-upcoming', 'smc-delayed', 'smc-finished', 'smc-is-live', 'smc-is-done');
@@ -965,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function syncStaleLiveView() {
-        const stale = isLivescoreStale(livescoreFetchedAt);
+        const stale = shouldShowStaleLive(livescoreCount, livescoreFetchedAt);
         paintStaleBanner(stale);
         const pill = document.getElementById('liveStatusPill');
         if (pill) {
@@ -987,6 +1024,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function noteLivescoreFetchedAt(detail) {
         if (!detail || !Object.prototype.hasOwnProperty.call(detail, 'fetchedAt')) return;
         livescoreFetchedAt = detail.fetchedAt || null;
+        if (Object.prototype.hasOwnProperty.call(detail, 'matchCount')) {
+            const count = Number(detail.matchCount);
+            livescoreCount = Number.isFinite(count) && count > 0 ? count : 0;
+        }
     }
 
     function stampDigestUpdated(iso) {

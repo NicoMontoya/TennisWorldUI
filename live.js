@@ -37,14 +37,21 @@ const LiveEngine = (() => {
 
     function publish(matches, updatedAt, fetchedAt) {
         window.dispatchEvent(new CustomEvent('tw:live-update', {
-            detail: { matches, updatedAt, fetchedAt: fetchedAt || null, tour: currentTour() },
+            detail: {
+                matches,
+                updatedAt,
+                fetchedAt: fetchedAt || null,
+                matchCount: Array.isArray(matches) ? matches.length : 0,
+                tour: currentTour(),
+            },
         }));
     }
 
-    function publishStatus(status, updatedAt, fetchedAt) {
+    function publishStatus(status, updatedAt, fetchedAt, matchCount) {
         const detail = { status, tour: currentTour() };
         if (updatedAt) detail.updatedAt = updatedAt;
         if (arguments.length > 2) detail.fetchedAt = fetchedAt || null;
+        if (arguments.length > 3) detail.matchCount = matchCount;
         window.dispatchEvent(new CustomEvent('tw:live-status', { detail }));
     }
 
@@ -112,7 +119,9 @@ const LiveEngine = (() => {
             // Every successful fetch carries updatedAt, even when the payload
             // is unchanged, so "Updated Ns ago" tracks the real last fetch.
             // fetchedAt is X-Fetched-At, or null when that header is missing or unusable.
-            publishStatus(hasLive || overlayLive ? 'connected' : 'idle', updatedAt, fetchedAt);
+            // matchCount is this response's array length; an empty list wins
+            // over a stale or 1970 header and keeps the normal empty state.
+            publishStatus(hasLive || overlayLive ? 'connected' : 'idle', updatedAt, fetchedAt, list.length);
 
             const keepPolling = running && !document.hidden && (hasLive || emptyStreak < EMPTY_IDLE_STREAK);
             if (keepPolling) {

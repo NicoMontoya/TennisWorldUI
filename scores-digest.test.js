@@ -32,7 +32,7 @@ function loadScoresHelpers() {
         'tournamentLabel', 'venueLabel', 'parseSetPair',
         'matchKeyOf', 'isFinishedStatus', 'isDelayedStatus', 'matchPhase', 'phaseLabel',
         'isLiveOrInProgressMatch', 'hubHasLiveOrInProgress', 'shouldRestartLiveFromHub',
-        'readLivescoreFetchedAt', 'isLivescoreStale', 'formatAsOfLabel',
+        'readLivescoreFetchedAt', 'isLivescoreStale', 'shouldShowStaleLive', 'formatAsOfLabel',
         'pairRoundKey', 'dedupePairRoundMatches',
         'matchTimeMs', 'mergeHubMatches', 'sortFlatMatches',
         'liveByKeyFrom', 'withLiveMeta', 'mergeLiveOverlay', 'overlayMatchesForHub',
@@ -43,10 +43,11 @@ function loadScoresHelpers() {
         extractConst(scoresSrc, 'CATEGORY_TABS'),
         extractConst(scoresSrc, 'STALE_LIVE_MS'),
         extractConst(scoresSrc, 'STALE_LIVE_BANNER'),
+        extractConst(scoresSrc, 'AS_OF_LABEL_MS'),
         'function parseTour(value) { const t = String(value == null ? "" : value).trim().toUpperCase(); return t === "ATP" || t === "WTA" ? t : null; }',
     ].join('\n');
     const body = names.map(n => extractFn(scoresSrc, n)).join('\n');
-    return new Function(prelude + '\n' + body + '; return { EVENT_TYPES, CATEGORY_TABS, parseEventType, parseDigestFilter, eventTypeOf, countByEventType, hasAnyEventType, preferredCategory, matchesForCategory, tournamentLabel, venueLabel, parseSetPair, matchKeyOf, isFinishedStatus, isDelayedStatus, matchPhase, phaseLabel, isLiveOrInProgressMatch, hubHasLiveOrInProgress, shouldRestartLiveFromHub, readLivescoreFetchedAt, isLivescoreStale, formatAsOfLabel, STALE_LIVE_MS, STALE_LIVE_BANNER, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, withLiveMeta, mergeLiveOverlay, overlayMatchesForHub, formatMatchClock, statusText };')();
+    return new Function(prelude + '\n' + body + '; return { EVENT_TYPES, CATEGORY_TABS, parseEventType, parseDigestFilter, eventTypeOf, countByEventType, hasAnyEventType, preferredCategory, matchesForCategory, tournamentLabel, venueLabel, parseSetPair, matchKeyOf, isFinishedStatus, isDelayedStatus, matchPhase, phaseLabel, isLiveOrInProgressMatch, hubHasLiveOrInProgress, shouldRestartLiveFromHub, readLivescoreFetchedAt, isLivescoreStale, shouldShowStaleLive, formatAsOfLabel, STALE_LIVE_MS, STALE_LIVE_BANNER, AS_OF_LABEL_MS, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, withLiveMeta, mergeLiveOverlay, overlayMatchesForHub, formatMatchClock, statusText };')();
 }
 
 function extractConst(src, name) {
@@ -592,7 +593,7 @@ describe('hub reload does not restart an idle livescore poll', () => {
         expect(extractFn(scoresSrc, 'paintDigestUpdated')).toMatch(/node\.textContent/);
         const poll = extractFn(liveSrc, 'poll');
         expect(poll).toMatch(/if \(serialized !== lastMatches\) \{\s*lastMatches = serialized;\s*publish\(list, updatedAt, fetchedAt\);/);
-        expect(poll).toMatch(/publishStatus\(hasLive \|\| overlayLive \? 'connected' : 'idle', updatedAt, fetchedAt\)/);
+        expect(poll).toMatch(/publishStatus\(hasLive \|\| overlayLive \? 'connected' : 'idle', updatedAt, fetchedAt, list\.length\)/);
         expect(poll).toMatch(/response\.headers\.get\('X-Fetched-At'\)/);
         expect(poll).toMatch(/readLivescoreFetchedAt\(headerValue\)/);
         expect(poll).not.toMatch(/data\.fetchedAt|payload\.fetchedAt/);
@@ -605,7 +606,9 @@ describe('stale live scores', () => {
     const {
         STALE_LIVE_MS,
         STALE_LIVE_BANNER,
+        AS_OF_LABEL_MS,
         isLivescoreStale,
+        shouldShowStaleLive,
         readLivescoreFetchedAt,
         formatAsOfLabel,
     } = loadScoresHelpers();
@@ -638,14 +641,70 @@ describe('stale live scores', () => {
         expect(scoresSrc).not.toMatch(/payload\.fetchedAt|data\.fetchedAt|readLivescoreMatches/);
     });
 
-    it('formats the as-of label in local hour and minute', () => {
-        const fetchedAt = '2026-09-28T19:12:00.000Z';
-        const time = new Date(fetchedAt).toLocaleTimeString(undefined, {
+    function localStamp(date) {
+        return date.toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
             hour: 'numeric',
             minute: '2-digit',
         });
-        expect(formatAsOfLabel(fetchedAt)).toBe(`as of ${time}`);
-        expect(extractFn(scoresSrc, 'formatAsOfLabel')).toMatch(/toLocaleTimeString\(undefined, \{\s*hour: 'numeric',\s*minute: '2-digit',\s*\}\)/);
+    }
+
+    function localTime(date) {
+        return date.toLocaleTimeString(undefined, {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    }
+
+    it('keeps the normal empty state and hides the banner when the livescore list is empty', () => {
+        const stale = headerAge((5 * 60 + 1) * 1000);
+        const placeholder = '1970-01-01T00:00:00.000Z';
+        expect(shouldShowStaleLive(0, stale, now)).toBe(false);
+        expect(shouldShowStaleLive(0, placeholder, now)).toBe(false);
+        expect(shouldShowStaleLive(0, null, now)).toBe(false);
+        expect(isLivescoreStale(stale, now)).toBe(true);
+        expect(extractFn(scoresSrc, 'renderFlatList')).toMatch(/No live matches right now\./);
+        expect(extractFn(scoresSrc, 'el')).toMatch(/node\.textContent = text/);
+        const sync = extractFn(scoresSrc, 'syncStaleLiveView');
+        expect(sync).toMatch(/shouldShowStaleLive\(livescoreCount, livescoreFetchedAt\)/);
+        expect(sync).toMatch(/paintStaleBanner\(stale\)/);
+        expect(extractFn(scoresSrc, 'paintStaleBanner')).toMatch(/if \(!stale\) \{\s*if \(existing\) existing\.remove\(\);/);
+        expect(extractFn(scoresSrc, 'noteLivescoreFetchedAt')).toMatch(/matchCount/);
+        expect(extractFn(liveSrc, 'publishStatus')).toMatch(/detail\.matchCount = matchCount/);
+        expect(scoresSrc).not.toMatch(/quota|hard-stop|hard stop/i);
+    });
+
+    it('formats today as a time and an earlier day within 7 days with the date', () => {
+        expect(AS_OF_LABEL_MS).toBe(7 * 24 * 60 * 60 * 1000);
+        const today = new Date(2026, 8, 28, 15, 12, 0);
+        const nowMs = new Date(2026, 8, 28, 18, 0, 0).getTime();
+        expect(formatAsOfLabel(today.toISOString(), nowMs)).toBe(`as of ${localTime(today)}`);
+        const yesterday = new Date(2026, 8, 27, 15, 12, 0);
+        expect(formatAsOfLabel(yesterday.toISOString(), nowMs)).toBe(`as of ${localStamp(yesterday)}`);
+        const week = new Date(nowMs - AS_OF_LABEL_MS);
+        expect(formatAsOfLabel(week.toISOString(), nowMs)).toBe(`as of ${localStamp(week)}`);
+        const labelFn = extractFn(scoresSrc, 'formatAsOfLabel');
+        expect(labelFn).toMatch(/toLocaleTimeString\(undefined, \{\s*hour: 'numeric',\s*minute: '2-digit',\s*\}\)/);
+        expect(labelFn).toMatch(/toLocaleString\(undefined, \{\s*month: 'short',\s*day: 'numeric',\s*hour: 'numeric',\s*minute: '2-digit',\s*\}\)/);
+    });
+
+    it('drops the as-of label after 7 days and for the 1970 placeholder, and still shows the banner', () => {
+        const nowMs = new Date(2026, 8, 28, 18, 0, 0).getTime();
+        const eightDays = new Date(nowMs - (8 * 24 * 60 * 60 * 1000)).toISOString();
+        const placeholder = '1970-01-01T00:00:00.000Z';
+        expect(formatAsOfLabel(eightDays, nowMs)).toBe('');
+        expect(formatAsOfLabel(placeholder, nowMs)).toBe('');
+        expect(formatAsOfLabel('1969-12-31T00:00:00.000Z', nowMs)).toBe('');
+        expect(shouldShowStaleLive(3, eightDays, nowMs)).toBe(true);
+        expect(shouldShowStaleLive(1, placeholder, nowMs)).toBe(true);
+        const paint = extractFn(scoresSrc, 'paintStatus');
+        expect(paint).toMatch(/const asOf = formatAsOfLabel\(livescoreFetchedAt\)/);
+        expect(paint).toMatch(/label\.textContent = asOf/);
+        expect(paint).toMatch(/label\.textContent = ''/);
+        expect(paint).toMatch(/badge\.hidden = true/);
+        expect(paint).toMatch(/smc-badge-stale/);
+        expect(paint).not.toMatch(/innerHTML/);
     });
 
     it('uses the single neutral banner line and textContent', () => {
@@ -661,7 +720,7 @@ describe('stale live scores', () => {
         expect(status).toMatch(/noteLivescoreFetchedAt\(detail\)/);
         expect(status).toMatch(/syncStaleLiveView\(\)/);
         expect(extractFn(scoresSrc, 'paintStatus')).toMatch(/formatAsOfLabel\(livescoreFetchedAt\)/);
-        expect(extractFn(scoresSrc, 'paintStatus')).toMatch(/label\.textContent = formatAsOfLabel/);
+        expect(extractFn(scoresSrc, 'paintStatus')).toMatch(/label\.textContent = asOf/);
         expect(extractFn(scoresSrc, 'paintStatus')).toMatch(/smc-badge-stale/);
     });
 });
