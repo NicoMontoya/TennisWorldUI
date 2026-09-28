@@ -2,15 +2,18 @@
 // TennisWorld — Live Score Engine
 // ===================================
 // Polls GET /api/livescore (anonymous — no Bearer).
-// Tour-aware (ATP|WTA allowlist). Floor 15s; backoff 15 → 30 → 60 on errors.
+// Tour-aware (ATP|WTA allowlist). Floor 30s; backoff 30 → 60 on errors.
 // Idle-stops only after EMPTY_IDLE_STREAK consecutive polls with no live
-// rows — a single empty response must not kill the overlay. Scores calls
-// refresh() on hub reload so newly InPlay matches resume without remount.
-// Pauses when document.hidden; one refresh on visibilitychange → visible.
+// rows — a single empty response must not kill the overlay. A Scores hub
+// reload must not call refresh() after an empty livescore response unless
+// the hub has a live or in-progress match, or the user switches tours.
+// Pauses when document.hidden. visibilitychange → visible calls refresh(),
+// which fetches immediately and then resumes the 30s cadence. It does not
+// wait out a tick that was cleared while the tab was hidden.
 
 const LiveEngine = (() => {
-    const POLL_MIN           = 15_000;
-    const POLL_LIVE          = 15_000;
+    const POLL_MIN           = 30_000;
+    const POLL_LIVE          = 30_000;
     const BACKOFF_CAP        = 60_000;
     const EMPTY_IDLE_STREAK  = 4;
 
@@ -21,6 +24,10 @@ const LiveEngine = (() => {
     let lastLiveList = null;
     let emptyStreak  = 0;
     let running      = false;
+    // null until the first successful poll. False once a response has no
+    // live rows — including before the idle streak finishes — so a hub
+    // reload can avoid resetting that streak.
+    let lastHadLive = null;
     let tour         = (typeof resolveTour === 'function' ? resolveTour() : 'ATP');
 
     function currentTour() {
@@ -28,16 +35,24 @@ const LiveEngine = (() => {
         return allowed || 'ATP';
     }
 
-    function publish(matches) {
+    function publish(matches, updatedAt, fetchedAt) {
         window.dispatchEvent(new CustomEvent('tw:live-update', {
-            detail: { matches, updatedAt: new Date().toISOString(), tour: currentTour() },
+            detail: {
+                matches,
+                updatedAt,
+                fetchedAt: fetchedAt || null,
+                matchCount: Array.isArray(matches) ? matches.length : 0,
+                tour: currentTour(),
+            },
         }));
     }
 
-    function publishStatus(status) {
-        window.dispatchEvent(new CustomEvent('tw:live-status', {
-            detail: { status, tour: currentTour() },
-        }));
+    function publishStatus(status, updatedAt, fetchedAt, matchCount) {
+        const detail = { status, tour: currentTour() };
+        if (updatedAt) detail.updatedAt = updatedAt;
+        if (arguments.length > 2) detail.fetchedAt = fetchedAt || null;
+        if (arguments.length > 3) detail.matchCount = matchCount;
+        window.dispatchEvent(new CustomEvent('tw:live-status', { detail }));
     }
 
     function clearTimer() {
@@ -62,11 +77,28 @@ const LiveEngine = (() => {
         inFlight = true;
         try {
             const t = currentTour();
-            const data = await apiFetch(`/api/livescore?tour=${encodeURIComponent(t)}`, { auth: false });
+            const fetched = await apiFetch(`/api/livescore?tour=${encodeURIComponent(t)}`, {
+                auth: false,
+                includeResponse: true,
+            });
             backoffMs = POLL_MIN;
 
+            // Body stays a bare match array. Upstream time is only the
+            // X-Fetched-At response header — never a payload field, and never
+            // the client clock (that is updatedAt, for "Updated Ns ago").
+            const data = fetched && Object.prototype.hasOwnProperty.call(fetched, 'response')
+                ? fetched.data
+                : fetched;
+            const response = fetched && fetched.response;
+            const headerValue = response && response.headers && typeof response.headers.get === 'function'
+                ? response.headers.get('X-Fetched-At')
+                : null;
             const list = Array.isArray(data) ? data : [];
+            const fetchedAt = typeof readLivescoreFetchedAt === 'function'
+                ? readLivescoreFetchedAt(headerValue)
+                : null;
             const hasLive = list.some(m => m && m.isLive);
+            lastHadLive = hasLive;
 
             if (hasLive) {
                 emptyStreak = 0;
@@ -76,14 +108,20 @@ const LiveEngine = (() => {
                 if (emptyStreak >= EMPTY_IDLE_STREAK) lastLiveList = [];
             }
 
+            const updatedAt = new Date().toISOString();
             const serialized = JSON.stringify(data);
             if (serialized !== lastMatches) {
                 lastMatches = serialized;
-                publish(list);
+                publish(list, updatedAt, fetchedAt);
             }
 
             const overlayLive = Array.isArray(lastLiveList) && lastLiveList.some(m => m && m.isLive);
-            publishStatus(hasLive || overlayLive ? 'connected' : 'idle');
+            // Every successful fetch carries updatedAt, even when the payload
+            // is unchanged, so "Updated Ns ago" tracks the real last fetch.
+            // fetchedAt is X-Fetched-At, or null when that header is missing or unusable.
+            // matchCount is this response's array length; an empty list wins
+            // over a stale or 1970 header and keeps the normal empty state.
+            publishStatus(hasLive || overlayLive ? 'connected' : 'idle', updatedAt, fetchedAt, list.length);
 
             const keepPolling = running && !document.hidden && (hasLive || emptyStreak < EMPTY_IDLE_STREAK);
             if (keepPolling) {
@@ -115,12 +153,20 @@ const LiveEngine = (() => {
             clearTimer();
         },
 
+        // Drop any pending tick and fetch now. The next poll is scheduled
+        // POLL_LIVE after this request succeeds.
         refresh() {
             if (document.hidden) return;
             running = true;
             emptyStreak = 0;
             clearTimer();
             poll();
+        },
+
+        // True while a livescore request is in flight or a tick is queued.
+        // Hub reloads use this so they don't cancel the 30s cadence.
+        isPolling() {
+            return !!(running && (timerId || inFlight));
         },
 
         setTour(next) {
@@ -145,6 +191,12 @@ const LiveEngine = (() => {
         // confirmed empty streak. null until the first successful poll.
         getLastMatches() {
             return lastLiveList;
+        },
+
+        // Whether the most recent successful livescore response contained
+        // a live row. null until that first response.
+        lastResponseHadLive() {
+            return lastHadLive;
         },
     };
 })();

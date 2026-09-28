@@ -7592,6 +7592,23 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     background: var(--accent-live);
 }
 
+.scores-stale-banner {
+    margin: 0 0 0.85rem;
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    line-height: 1.45;
+}
+
+.smc-badge-stale {
+    color: var(--text-muted);
+    background: transparent;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+    padding-left: 0;
+}
+
 .smc-badge-upcoming {
     color: var(--text-muted);
     background: transparent;
