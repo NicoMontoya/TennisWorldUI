@@ -31,6 +31,7 @@ function loadScoresHelpers() {
         'hasAnyEventType', 'preferredCategory', 'matchesForCategory',
         'tournamentLabel', 'venueLabel', 'parseSetPair',
         'matchKeyOf', 'isFinishedStatus', 'isDelayedStatus', 'matchPhase', 'phaseLabel',
+        'isLiveOrInProgressMatch', 'hubHasLiveOrInProgress', 'shouldRestartLiveFromHub',
         'pairRoundKey', 'dedupePairRoundMatches',
         'matchTimeMs', 'mergeHubMatches', 'sortFlatMatches',
         'liveByKeyFrom', 'withLiveMeta', 'mergeLiveOverlay', 'overlayMatchesForHub',
@@ -42,7 +43,7 @@ function loadScoresHelpers() {
         'function parseTour(value) { const t = String(value == null ? "" : value).trim().toUpperCase(); return t === "ATP" || t === "WTA" ? t : null; }',
     ].join('\n');
     const body = names.map(n => extractFn(scoresSrc, n)).join('\n');
-    return new Function(prelude + '\n' + body + '; return { EVENT_TYPES, CATEGORY_TABS, parseEventType, parseDigestFilter, eventTypeOf, countByEventType, hasAnyEventType, preferredCategory, matchesForCategory, tournamentLabel, venueLabel, parseSetPair, matchKeyOf, isFinishedStatus, isDelayedStatus, matchPhase, phaseLabel, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, withLiveMeta, mergeLiveOverlay, overlayMatchesForHub, formatMatchClock, statusText };')();
+    return new Function(prelude + '\n' + body + '; return { EVENT_TYPES, CATEGORY_TABS, parseEventType, parseDigestFilter, eventTypeOf, countByEventType, hasAnyEventType, preferredCategory, matchesForCategory, tournamentLabel, venueLabel, parseSetPair, matchKeyOf, isFinishedStatus, isDelayedStatus, matchPhase, phaseLabel, isLiveOrInProgressMatch, hubHasLiveOrInProgress, shouldRestartLiveFromHub, pairRoundKey, dedupePairRoundMatches, matchTimeMs, mergeHubMatches, sortFlatMatches, liveByKeyFrom, withLiveMeta, mergeLiveOverlay, overlayMatchesForHub, formatMatchClock, statusText };')();
 }
 
 function extractConst(src, name) {
@@ -93,12 +94,12 @@ describe('TW Security acceptance checklist', () => {
         expect(scoresHtml).toContain('data-cf-beacon=\'{"token": "942ca2c26fd44a78b8f81b74b22f5f41"}\'');
     });
 
-    it('4. PUBLIC_GET hub/livescore/calendar unchanged; SW is tw-v48', () => {
+    it('4. PUBLIC_GET hub/livescore/calendar unchanged; SW is tw-v49', () => {
         const sharedSrc = readFileSync(new URL('./shared.js', import.meta.url), 'utf8');
         expect(sharedSrc).toMatch(/const PUBLIC_GET_PATHS = \['\/api\/hub', '\/api\/livescore', '\/api\/calendar'\]/);
         expect(scoresSrc).toMatch(/apiFetch\(`\/api\/hub\?tour=\$\{encodeURIComponent\(tour\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
         expect(liveSrc).toMatch(/apiFetch\(`\/api\/livescore\?tour=\$\{encodeURIComponent\(t\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v48'/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v49'/);
         expect(swSrc).not.toMatch(/tw-v43/);
         expect(swSrc).not.toMatch(/peakOverlap/);
     });
@@ -251,12 +252,14 @@ describe('hub merge + All sort', () => {
 });
 
 describe('LiveEngine tour + idle contract', () => {
-    it('is tour-aware and keeps the 15s live floor', () => {
+    it('is tour-aware and polls live scores every 30s', () => {
         expect(liveSrc).toMatch(/function currentTour\(/);
         expect(liveSrc).toMatch(/setTour\(/);
-        expect(liveSrc).toMatch(/POLL_LIVE\s*=\s*15_000/);
+        expect(liveSrc).toMatch(/POLL_MIN\s*=\s*30_000/);
+        expect(liveSrc).toMatch(/POLL_LIVE\s*=\s*30_000/);
         expect(liveSrc).toMatch(/document\.hidden/);
         expect(liveSrc).toMatch(/auth:\s*false/);
+        expect(liveSrc).toMatch(/lastResponseHadLive\(/);
     });
 
     it('idle-stops only after several empty polls and exposes last live list', () => {
@@ -513,19 +516,73 @@ describe('MatchCard / DrawMatch / VisualBracket delayed-status equivalents', () 
     });
 });
 
-describe('Scores always starts LiveEngine', () => {
-    it('refreshes LiveEngine on hub load without gating on hub isLive', () => {
+describe('hub reload does not restart an idle livescore poll', () => {
+    const {
+        isLiveOrInProgressMatch,
+        hubHasLiveOrInProgress,
+        shouldRestartLiveFromHub,
+    } = loadScoresHelpers();
+
+    it('recognizes live and in-progress hub rows', () => {
+        expect(isLiveOrInProgressMatch({ isLive: true, status: 'Not Started' })).toBe(true);
+        expect(isLiveOrInProgressMatch({ status: 'In Progress' })).toBe(true);
+        expect(isLiveOrInProgressMatch({ status: 'in-progress' })).toBe(true);
+        expect(isLiveOrInProgressMatch({ status: 'InPlay' })).toBe(true);
+        expect(isLiveOrInProgressMatch({ status: 'in play' })).toBe(true);
+        expect(isLiveOrInProgressMatch({ status: 'Live' })).toBe(true);
+        expect(isLiveOrInProgressMatch({ status: '1' })).toBe(true);
+        expect(isLiveOrInProgressMatch({ status: 'Not Started' })).toBe(false);
+        expect(isLiveOrInProgressMatch({ status: 'Finished' })).toBe(false);
+        expect(isLiveOrInProgressMatch({ status: 'Delayed' })).toBe(false);
+        expect(isLiveOrInProgressMatch(null)).toBe(false);
+        expect(hubHasLiveOrInProgress([
+            { status: 'Not Started' },
+            { status: 'In Progress' },
+        ])).toBe(true);
+        expect(hubHasLiveOrInProgress([{ status: 'Finished' }])).toBe(false);
+        expect(hubHasLiveOrInProgress([])).toBe(false);
+    });
+
+    it('skips refresh when the last livescore response was empty and the hub is quiet', () => {
+        expect(shouldRestartLiveFromHub(false, [{ status: 'Not Started' }], false)).toBe(false);
+        expect(shouldRestartLiveFromHub(false, [{ status: 'Finished' }, { status: 'Delayed' }], false)).toBe(false);
+        expect(shouldRestartLiveFromHub(false, [], false)).toBe(false);
+    });
+
+    it('restarts when the hub reports a live or in-progress match', () => {
+        expect(shouldRestartLiveFromHub(false, [{ status: 'In Progress' }], false)).toBe(true);
+        expect(shouldRestartLiveFromHub(false, [{ isLive: true, status: 'Not Started' }], false)).toBe(true);
+        expect(shouldRestartLiveFromHub(false, [{ status: 'InPlay' }], false)).toBe(true);
+    });
+
+    it('restarts on an explicit tour or tab action, and before the first livescore response', () => {
+        expect(shouldRestartLiveFromHub(false, [{ status: 'Not Started' }], true)).toBe(true);
+        expect(shouldRestartLiveFromHub(null, [{ status: 'Not Started' }], false)).toBe(true);
+        expect(shouldRestartLiveFromHub(true, [{ status: 'Not Started' }], false)).toBe(true);
+    });
+
+    it('gates ensureLiveEngine and forces refresh only for tour, tab, and retry', () => {
         expect(scoresSrc).toMatch(/function ensureLiveEngine\(/);
-        expect(scoresSrc).toMatch(/LiveEngine\.refresh\(\)/);
+        expect(extractFn(scoresSrc, 'ensureLiveEngine')).toMatch(/shouldRestartLiveFromHub\(/);
+        expect(extractFn(scoresSrc, 'ensureLiveEngine')).toMatch(/LiveEngine\.lastResponseHadLive\(\)/);
+        expect(extractFn(scoresSrc, 'ensureLiveEngine')).toMatch(/LiveEngine\.refresh\(\)/);
+        expect(extractFn(scoresSrc, 'setTour')).toMatch(/loadHub\(\{\s*explicit:\s*true\s*\}\)/);
+        expect(extractFn(scoresSrc, 'showListError')).toMatch(/loadHub\(\{\s*explicit:\s*true\s*\}\)/);
+        const vis = scoresSrc.slice(scoresSrc.lastIndexOf("document.addEventListener('visibilitychange'"));
+        expect(vis).toMatch(/loadHub\(\{\s*explicit:\s*true\s*\}\)/);
+        const schedule = extractFn(scoresSrc, 'scheduleHubPoll');
+        expect(schedule).toMatch(/await loadHub\(\)/);
+        expect(schedule).not.toMatch(/explicit/);
         expect(scoresSrc).toMatch(/dedupePairRoundMatches\(\s*mergeLiveOverlay\(mergeHubMatches\(data\), liveOverlaySource\(\)\)/);
         expect(scoresSrc).not.toMatch(/startLiveOverlayIfNeeded/);
         expect(scoresSrc).not.toMatch(/if \(live\) LiveEngine\.start/);
+        expect(scoresSrc).not.toMatch(/\.innerHTML\s*=/);
     });
 });
 
-describe('service worker tw-v48', () => {
+describe('service worker tw-v49', () => {
     it('bumps cache and still precaches scores.html without peakOverlap', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v48'/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v49'/);
         expect(swSrc).not.toMatch(/tw-v43/);
         expect(swSrc).toMatch(/'\/scores\.html'/);
         expect(swSrc).not.toMatch(/peakOverlap/);

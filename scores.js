@@ -2,9 +2,11 @@
 // TennisWorld — Scores / Hub page
 // ===================================
 // Primary: GET /api/hub (anonymous). Hub fixtures do not carry isLive —
-// LiveEngine always runs on Scores and overlays GET /api/livescore.
-// Hub interval reloads merge last live fields onto matching matchKeys
-// before paint so fixtures cannot flash Live → Not Started.
+// LiveEngine overlays GET /api/livescore while a match is live or in
+// progress, and after the user switches tours or brings the tab back.
+// Hub interval reloads do not restart an idle livescore poll. They still
+// merge last live fields onto matching matchKeys before paint so fixtures
+// cannot flash Live → Not Started.
 // All API strings go through textContent or dataset — never concatenated
 // into innerHTML. Live flash: classList + textContent on score cells only.
 // Never rebuild a card from a live payload. TW Security checklist:
@@ -127,6 +129,35 @@ function matchPhase(m) {
     if (m && isFinishedStatus(m.status)) return 'finished';
     if (m && isDelayedStatus(m.status)) return 'delayed';
     return 'upcoming';
+}
+
+// Hub rows often omit isLive. InPlay / In Progress / legacy status "1"
+// still mean a match is on court.
+function isLiveOrInProgressMatch(m) {
+    if (!m) return false;
+    if (m.isLive) return true;
+    const s = String(m.status == null ? '' : m.status).trim().toLowerCase();
+    return s === '1'
+        || s === 'live'
+        || s === 'inplay'
+        || s === 'in play'
+        || s === 'in-progress'
+        || s === 'in progress';
+}
+
+function hubHasLiveOrInProgress(matches) {
+    return (matches || []).some(isLiveOrInProgressMatch);
+}
+
+// Skip LiveEngine.refresh() on a hub reload once livescore has returned
+// an empty board and the hub still shows nothing on court. lastHadLive
+// null means no successful livescore response yet, so the first load
+// still starts polling. explicit covers tour changes, the tab becoming
+// visible, and Try again.
+function shouldRestartLiveFromHub(lastHadLive, matches, explicit) {
+    if (explicit) return true;
+    if (hubHasLiveOrInProgress(matches)) return true;
+    return lastHadLive !== false;
 }
 
 function phaseLabel(m) {
@@ -385,7 +416,7 @@ document.addEventListener('DOMContentLoaded', () => {
         paintTourToggle();
         if (typeof LiveEngine !== 'undefined') LiveEngine.setTour(allowed);
         listMounted = false;
-        loadHub();
+        loadHub({ explicit: true });
     }
 
     function paintTourToggle() {
@@ -983,15 +1014,19 @@ document.addEventListener('DOMContentLoaded', () => {
         card.appendChild(el('span', 'error-card-msg', 'Could not load match data.'));
         const btn = el('button', 'error-retry-btn', 'Try again');
         btn.type = 'button';
-        btn.addEventListener('click', () => loadHub());
+        btn.addEventListener('click', () => loadHub({ explicit: true }));
         card.appendChild(btn);
         list.appendChild(card);
         listMounted = false;
     }
 
-    function ensureLiveEngine() {
+    function ensureLiveEngine(matches, explicit) {
         if (typeof LiveEngine === 'undefined') return;
         LiveEngine.setTour(currentTour);
+        const lastHadLive = typeof LiveEngine.lastResponseHadLive === 'function'
+            ? LiveEngine.lastResponseHadLive()
+            : null;
+        if (!shouldRestartLiveFromHub(lastHadLive, matches, explicit)) return;
         LiveEngine.refresh();
     }
 
@@ -1018,7 +1053,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, HUB_INTERVAL_MS);
     }
 
-    async function loadHub() {
+    async function loadHub(opts) {
         const list = document.getElementById('scoresList');
         const section = document.getElementById('scoresSection');
         if (section) section.hidden = false;
@@ -1049,7 +1084,7 @@ document.addEventListener('DOMContentLoaded', () => {
             categoryFilter = resolveCategory(merged);
             paintHeader(data.tournament, merged);
             renderFlatList(merged);
-            ensureLiveEngine();
+            ensureLiveEngine(merged, !!(opts && opts.explicit));
 
         } catch (err) {
             console.warn('Hub load failed:', err.message);
@@ -1086,7 +1121,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.hidden) {
             stopHubPoll();
         } else {
-            loadHub();
+            loadHub({ explicit: true });
             scheduleHubPoll();
         }
     });

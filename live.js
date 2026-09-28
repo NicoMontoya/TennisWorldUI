@@ -2,15 +2,16 @@
 // TennisWorld — Live Score Engine
 // ===================================
 // Polls GET /api/livescore (anonymous — no Bearer).
-// Tour-aware (ATP|WTA allowlist). Floor 15s; backoff 15 → 30 → 60 on errors.
+// Tour-aware (ATP|WTA allowlist). Floor 30s; backoff 30 → 60 on errors.
 // Idle-stops only after EMPTY_IDLE_STREAK consecutive polls with no live
-// rows — a single empty response must not kill the overlay. Scores calls
-// refresh() on hub reload so newly InPlay matches resume without remount.
+// rows — a single empty response must not kill the overlay. A Scores hub
+// reload must not call refresh() after an empty livescore response unless
+// the hub has a live or in-progress match, or the user switches tours/tabs.
 // Pauses when document.hidden; one refresh on visibilitychange → visible.
 
 const LiveEngine = (() => {
-    const POLL_MIN           = 15_000;
-    const POLL_LIVE          = 15_000;
+    const POLL_MIN           = 30_000;
+    const POLL_LIVE          = 30_000;
     const BACKOFF_CAP        = 60_000;
     const EMPTY_IDLE_STREAK  = 4;
 
@@ -21,6 +22,10 @@ const LiveEngine = (() => {
     let lastLiveList = null;
     let emptyStreak  = 0;
     let running      = false;
+    // null until the first successful poll. False once a response has no
+    // live rows — including before the idle streak finishes — so a hub
+    // reload can avoid resetting that streak.
+    let lastHadLive = null;
     let tour         = (typeof resolveTour === 'function' ? resolveTour() : 'ATP');
 
     function currentTour() {
@@ -67,6 +72,7 @@ const LiveEngine = (() => {
 
             const list = Array.isArray(data) ? data : [];
             const hasLive = list.some(m => m && m.isLive);
+            lastHadLive = hasLive;
 
             if (hasLive) {
                 emptyStreak = 0;
@@ -145,6 +151,12 @@ const LiveEngine = (() => {
         // confirmed empty streak. null until the first successful poll.
         getLastMatches() {
             return lastLiveList;
+        },
+
+        // Whether the most recent successful livescore response contained
+        // a live row. null until that first response.
+        lastResponseHadLive() {
+            return lastHadLive;
         },
     };
 })();
