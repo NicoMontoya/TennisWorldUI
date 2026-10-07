@@ -454,10 +454,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return node;
     }
 
-    function anyLive(matches) {
-        return (matches || []).some(m => m && m.isLive);
-    }
-
     function motionOk() {
         try {
             return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -495,11 +491,6 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.toggle('is-active', on);
             btn.setAttribute('aria-pressed', String(on));
         });
-    }
-
-    function pageSub(hasLive) {
-        if (hasLive) return `${currentTour} live scores update as matches progress.`;
-        return `${currentTour} scores update as matches progress.`;
     }
 
     // ── Hub helpers ─────────────────────────────────────────────────────────
@@ -546,13 +537,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return '';
     }
 
-    function paintHeader(tournament, matches) {
+    function paintHeader(tournament) {
         const nameEl = document.getElementById('hubTournamentName');
-        const eyeEl  = document.getElementById('hubEyebrow');
-        const subEl  = document.getElementById('hubPageSub');
-        if (eyeEl) eyeEl.textContent = 'Scores';
         if (nameEl) nameEl.textContent = 'Scores';
-        if (subEl) subEl.textContent = pageSub(anyLive(matches));
         const pill = document.getElementById('hubSurface');
         if (pill) {
             const raw = tournament && tournament.surface ? String(tournament.surface).trim() : '';
@@ -1108,8 +1095,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (scoreChanged) paintDigestCounts(scopedMatches(flatMatches));
         paintCategoryTabs(flatMatches);
-        const subEl = document.getElementById('hubPageSub');
-        if (subEl) subEl.textContent = pageSub(anyLive(flatMatches));
         syncStaleLiveView();
     });
 
@@ -1190,7 +1175,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentTournamentKey = null;
                 currentTournamentName = '';
                 categoryFilter = null;
-                paintHeader(null, []);
+                paintHeader(null);
                 renderFlatList([]);
                 return;
             }
@@ -1202,7 +1187,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 mergeLiveOverlay(mergeHubMatches(data), liveOverlaySource())
             ));
             categoryFilter = resolveCategory(merged);
-            paintHeader(data.tournament, merged);
+            paintHeader(data.tournament);
             renderFlatList(merged);
             ensureLiveEngine(merged, !!(opts && opts.explicit));
 

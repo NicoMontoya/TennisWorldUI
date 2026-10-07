@@ -3,20 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TennisWorld — Curves</title>
-    <meta name="description" content="Vintage curves — career trajectories by age — plus draws, rankings, and analytics for ATP and WTA tennis.">
+    <title>TennisWorld — Career Trajectories</title>
+    <meta name="description" content="Career trajectories by age — plus draws, rankings, and analytics for ATP and WTA tennis.">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://tennisworld.dev/">
     <!-- Open Graph -->
     <meta property="og:type"        content="website">
     <meta property="og:url"         content="https://tennisworld.dev/">
-    <meta property="og:title"       content="TennisWorld — Curves">
-    <meta property="og:description" content="Vintage curves — career trajectories by age — plus draws, rankings, and analytics for ATP and WTA tennis.">
+    <meta property="og:title"       content="TennisWorld — Career Trajectories">
+    <meta property="og:description" content="Career trajectories by age — plus draws, rankings, and analytics for ATP and WTA tennis.">
     <meta property="og:image"       content="https://tennisworld.dev/screenshots/scores.png">
     <!-- Twitter Card -->
     <meta name="twitter:card"        content="summary_large_image">
-    <meta name="twitter:title"       content="TennisWorld — Curves">
-    <meta name="twitter:description" content="Vintage curves — career trajectories by age — plus draws, rankings, and analytics for ATP and WTA tennis.">
+    <meta name="twitter:title"       content="TennisWorld — Career Trajectories">
+    <meta name="twitter:description" content="Career trajectories by age — plus draws, rankings, and analytics for ATP and WTA tennis.">
     <meta name="twitter:image"       content="https://tennisworld.dev/screenshots/scores.png">
     <!-- JSON-LD -->
     <script type="application/ld+json">
@@ -34,7 +34,7 @@
     }
     </script>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=tw47">
+    <link rel="stylesheet" href="styles.css?v=tw50">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e14">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -92,13 +92,10 @@
         <a class="soft-launch-link" href="scores.html">Open Scores</a>
     </div>
 
-    <!-- Vintage Curves — career trajectories by age -->
     <section class="vintage-section" id="home">
         <div class="vintage-container">
             <header class="vintage-header">
-                <p class="hub-eyebrow">Career Trajectories</p>
-                <h1 class="vintage-title">Vintage Curves</h1>
-                <p class="vintage-sub" id="vintageSub">Cumulative matches won by age — ATP top 10 by default. Add or remove players to compare careers at the same age.</p>
+                <h1 class="vintage-title">Career Trajectories</h1>
             </header>
 
             <div class="vintage-controls">
@@ -132,7 +129,7 @@
                     <span class="vintage-skel-label">Loading career data…</span>
                 </div>
                 <div class="chart-empty" id="vintageEmpty" hidden>No career curves available.</div>
-                <canvas id="vintageChart" role="img" aria-label="Vintage curves: cumulative matches won by player age"></canvas>
+                <canvas id="vintageChart" role="img" aria-label="Career trajectories: cumulative matches won by player age"></canvas>
             </div>
             <p class="vintage-note" id="vintageNote" role="status" aria-live="polite"></p>
         </div>

@@ -107,12 +107,6 @@
             panel.hidden = !historical;
             const wtaBtn = document.querySelector('.tab-btn[data-tab="wta"]');
             if (wtaBtn) wtaBtn.hidden = historical;
-            const sub = document.getElementById('rankingsSubtitle');
-            if (sub) {
-                sub.textContent = historical
-                    ? 'ATP · any week since 1973 · retired players included'
-                    : 'Overall · Live data';
-            }
         }
 
         function syncAtpOnlyChrome() {

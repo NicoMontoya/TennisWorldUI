@@ -1,5 +1,5 @@
 // ===================================
-// TennisWorld — Home / Vintage Curves
+// TennisWorld — Home / Career Trajectories
 // ===================================
 // Cumulative career metric vs age ("years old"), one curve per player.
 // Data: /api/vintage-roster (top-100 + ATP legends) and
@@ -53,7 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
         reset:   document.getElementById('resetTop10'),
         toggle:  document.getElementById('metricToggle'),
         note:    document.getElementById('vintageNote'),
-        sub:     document.getElementById('vintageSub'),
         chartWrap: document.getElementById('vintageChartWrap'),
         empty:   document.getElementById('vintageEmpty'),
     };
@@ -555,16 +554,11 @@ document.addEventListener('DOMContentLoaded', () => {
             b.classList.toggle('active', active);
             b.setAttribute('aria-pressed', String(active));
         });
-        if (metric === 'rk') {
-            els.sub.textContent = 'ATP rank (Top 200) by age — add or remove players to compare careers at the same age.';
-            selection.forEach(p => enqueueRank(p.id));
-        } else {
-            els.sub.textContent = `Cumulative ${METRICS[metric].label.toLowerCase()} by age — add or remove players to compare careers at the same age.`;
-        }
+        if (metric === 'rk') selection.forEach(p => enqueueRank(p.id));
         if (els.canvas) {
             els.canvas.setAttribute('aria-label', metric === 'rk'
-                ? 'Vintage curves: ATP rank by player age'
-                : 'Vintage curves: cumulative ' + METRICS[metric].label.toLowerCase() + ' by player age');
+                ? 'Career trajectories: ATP rank by player age'
+                : 'Career trajectories: cumulative ' + METRICS[metric].label.toLowerCase() + ' by player age');
         }
         syncChart();
     });
@@ -586,7 +580,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!roster.length) {
             if (els.loading) {
-                els.loading.textContent = 'No vintage roster available.';
+                els.loading.textContent = 'No career roster available.';
                 els.loading.style.display = '';
             }
             setEmpty('');

@@ -16,7 +16,7 @@
     <meta name="twitter:title"       content="TennisWorld — ATP & WTA Rankings">
     <meta name="twitter:description" content="Live ATP and WTA world rankings with surface splits, win percentages, and form.">
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=tw44">
+    <link rel="stylesheet" href="styles.css?v=tw50">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e14">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -72,7 +72,6 @@
         <div class="section-header-row" data-scroll-reveal>
             <div>
                 <h2 class="section-title" id="rankingsTitle">ATP Rankings</h2>
-                <p class="section-subtitle" id="rankingsSubtitle">Overall · Live data</p>
             </div>
             <div class="table-controls">
                 <div class="table-search-wrap">
@@ -85,6 +84,14 @@
             </div>
         </div>
 
+        <div class="surface-tabs" id="surfaceTabs" role="tablist" aria-label="Surface form">
+            <button type="button" class="surface-tab active" role="tab" data-surface="overall" aria-selected="true">Overall</button>
+            <button type="button" class="surface-tab" role="tab" data-surface="hard" aria-selected="false">Hard · form</button>
+            <button type="button" class="surface-tab" role="tab" data-surface="clay" aria-selected="false">Clay · form</button>
+            <button type="button" class="surface-tab" role="tab" data-surface="grass" aria-selected="false">Grass · form</button>
+        </div>
+
+        <div class="rankings-scroll">
         <table class="rankings-table" id="rankingsTable" data-scroll-reveal>
             <thead>
                 <tr>
@@ -92,9 +99,10 @@
                     <th class="col-flag"></th>
                     <th class="col-name" data-sort="name">Player</th>
                     <th class="col-age num" data-sort="age">Age</th>
+                    <th class="col-wl num" data-sort="wl" data-tooltip="Wins and losses on this surface over the last 52 weeks">W–L<span class="sort-arrow"></span></th>
                     <th class="col-pts num" data-sort="pts" data-tooltip="Ranking points (past 52 weeks)">PTS<span class="sort-arrow"></span></th>
                     <th class="col-titles num" data-sort="titles" data-tooltip="Career ATP/WTA titles (main tour and above)">Titles<span class="sort-arrow"></span></th>
-                    <th class="col-wpct num" data-sort="wpct" data-tooltip="Win percentage this season">W%<span class="sort-arrow"></span></th>
+                    <th class="col-wpct num" data-sort="wpct" data-tooltip="Win percentage this season"><span class="wpct-label">W%</span><span class="sort-arrow"></span></th>
                     <th class="col-form" data-tooltip="Last 10 match results — W win, L loss (most recent right)">Form</th>
                 </tr>
             </thead>
@@ -102,6 +110,7 @@
                 <tr><td colspan="8" style="text-align:center;padding:2rem;color:#999;font-size:.875rem;">Loading rankings…</td></tr>
             </tbody>
         </table>
+        </div>
         <div class="rankings-pagination" id="rankingsPagination"></div>
     </section>
 

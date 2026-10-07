@@ -343,42 +343,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!tbody) return;
 
         setHeadersSurface(tour, surface);
-        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:1.5rem;color:#999;font-size:.875rem;">Loading ${SURFACE_LABELS[surface]} rankings…</td></tr>`;
-
-        try {
-            const data = await apiFetch(`/api/surface-standings?tour=${tour}&surface=${surface}`);
-
-            tbody.innerHTML = data.map(p => {
-                const rankDiff  = p.atpRank - p.surfaceRank; // positive = better on surface than overall
-                const diffLabel = rankDiff > 0 ? `<span style="color:var(--positive)">▲${rankDiff}</span>`
-                                : rankDiff < 0 ? `<span style="color:var(--negative)">▼${Math.abs(rankDiff)}</span>`
-                                : `<span style="color:#999">–</span>`;
-                const wl = p.matchesPlayed > 0 ? `${p.wins}–${p.losses}` : '—';
-                const winPct = p.matchesPlayed > 0 ? `${p.winPct}%` : '—';
-
-                return `<tr
-                    data-name="${p.name}"
-                    data-rank="${p.surfaceRank}"
-                    data-pts="${p.winPct}"
-                    data-age="${p.atpRank}" data-titles="${p.matchesPlayed}"
-                    data-wpct="${p.winPct}" data-hard="0" data-clay="0" data-form="">
-                    <td class="col-rank">${p.surfaceRank}</td>
-                    <td class="col-flag">${flag(p.country)}</td>
-                    <td class="col-name">${p.name}</td>
-                    <td class="num">#${p.atpRank}</td>
-                    <td class="num">${wl}</td>
-                    <td class="num">${p.matchesPlayed || '—'}</td>
-                    <td class="num">${winPct}</td>
-                    <td class="num">${diffLabel}</td>
-                    <td class="num"></td>
-                    <td class="col-form"></td>
-                </tr>`;
-            }).join('');
-
-        } catch (err) {
-            console.warn(`Surface standings failed (${err.message})`);
-            tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:1rem;color:#999;font-size:.875rem;">Could not load surface data.</td></tr>`;
-        }
+        tbody.textContent = '';
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 10;
+        td.textContent = 'Surface form is on the rankings page.';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
     }
 
     // ===================================
