@@ -656,17 +656,12 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     font-size: clamp(1.75rem, 4vw, 2.75rem);
     font-weight: 600;
     letter-spacing: -0.02em;
-    margin-bottom: 0.35rem;
+    margin-bottom: 0;
     color: var(--text-primary);
     line-height: 1.1;
 }
 
-.section-subtitle {
-    font-family: var(--font-serif);
-    font-size: 1rem;
-    font-style: italic;
-    color: var(--text-secondary);
-}
+.cal-header-left .section-title { margin-bottom: 0.35rem; }
 
 /* ===================================
    Draws / Tournament Calendar
@@ -2498,23 +2493,13 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     border-bottom: 1px solid var(--border);
 }
 
-.hub-eyebrow {
-    font-family: var(--font-serif);
-    font-size: 0.85rem;
-    font-style: italic;
-    text-transform: none;
-    letter-spacing: 0.02em;
-    color: var(--text-secondary);
-    margin-bottom: 0.25rem;
-}
-
 .hub-title {
     font-family: var(--font-serif);
     font-size: clamp(1.5rem, 3vw, 2.25rem);
     font-weight: 600;
     letter-spacing: -0.02em;
     color: var(--text-primary);
-    margin-bottom: 0.5rem;
+    margin-bottom: 0;
     line-height: 1.1;
 }
 
@@ -3044,8 +3029,8 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
-    margin-bottom: 1.5rem;
-    padding-bottom: 1.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
     border-bottom: 1px solid var(--border);
     flex-wrap: wrap;
     gap: 1rem;
@@ -3062,6 +3047,15 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     display: flex;
     gap: 0;
     border: 1px solid var(--border-strong);
+    max-width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+}
+
+.players-section .surface-tabs {
+    margin: 0 0 1.25rem;
 }
 
 .surface-tab {
@@ -3076,6 +3070,15 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     border-right: 1px solid var(--border-strong);
     transition: background 0.15s, color 0.15s;
     letter-spacing: 0.02em;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    scroll-margin-inline: 0.5rem;
+}
+
+.surface-tab:focus-visible {
+    outline: 2px solid var(--text-primary);
+    outline-offset: -2px;
+    z-index: 1;
 }
 
 .surface-tab:last-child { border-right: none; }
@@ -3182,6 +3185,40 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
 .col-titles { width: 3.5rem; }
 .col-wpct   { width: 3.5rem; }
 .col-form   { width: 10rem; } /* wider — 10 dots */
+.col-wl     { width: 4.5rem; }
+
+.rankings-scroll {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.rankings-table .col-wl { display: none; }
+
+.rankings-table.is-surface .col-pts,
+.rankings-table.is-surface .col-titles,
+.rankings-table.is-surface .col-form { display: none; }
+
+.rankings-table.is-surface .col-wl { display: table-cell; }
+
+.rankings-table.is-surface th.col-wpct {
+    white-space: normal;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.68rem;
+    line-height: 1.25;
+    max-width: 11rem;
+}
+
+.rankings-status {
+    text-align: center;
+    padding: 2rem 1rem !important;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
 
 /* Surface highlight in table */
 .surface-highlight { color: var(--text-primary); font-weight: 700; }
@@ -7022,7 +7059,7 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
 .pp-full-profile:hover { text-decoration: underline; }
 
 /* ===================================
-   Home — Vintage Curves
+   Home — Career Trajectories
    =================================== */
 
 .vintage-section {
@@ -7041,15 +7078,7 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
     font-size: clamp(2rem, 4vw, 2.75rem);
     font-weight: 500;
     color: var(--text-primary);
-    margin: 0.25rem 0 0.5rem;
-}
-
-.vintage-sub {
-    font-family: var(--font-sans);
-    font-size: 0.9375rem;
-    color: var(--text-secondary);
-    max-width: 56ch;
-    margin: 0 0 1.5rem;
+    margin: 0 0 1.25rem;
 }
 
 .vintage-controls {
@@ -7952,6 +7981,19 @@ html[data-theme="dark"]       .nav-theme-toggle .icon-sun  { display: block; }
         max-height: 52px;
     }
     .view-toggle { flex: 0 0 auto; }
+}
+
+@media (max-width: 480px) {
+    .players-section .surface-tab {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 0 0.9rem;
+        font-size: 0.8rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .surface-tab { transition: none; }
 }
 
 @media (max-width: 375px) {

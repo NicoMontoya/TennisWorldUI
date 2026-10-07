@@ -1,4 +1,4 @@
-// TennisWorld — Vintage Curves rank-by-age
+// TennisWorld — rank-by-age for Career Trajectories
 // Pure helpers for the Rank metric. No DOM writes except paintText, which
 // sets textContent only. Tooltip strings are plain text for the canvas tooltip.
 //

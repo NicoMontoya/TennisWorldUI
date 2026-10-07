@@ -98,12 +98,12 @@ describe('TW Security acceptance checklist', () => {
         expect(scoresHtml).toContain('data-cf-beacon=\'{"token": "942ca2c26fd44a78b8f81b74b22f5f41"}\'');
     });
 
-    it('4. PUBLIC_GET hub/livescore/calendar unchanged; SW is tw-v49', () => {
+    it('4. PUBLIC_GET hub/livescore/calendar unchanged; SW is tw-v50', () => {
         const sharedSrc = readFileSync(new URL('./shared.js', import.meta.url), 'utf8');
         expect(sharedSrc).toMatch(/const PUBLIC_GET_PATHS = \['\/api\/hub', '\/api\/livescore', '\/api\/calendar'\]/);
         expect(scoresSrc).toMatch(/apiFetch\(`\/api\/hub\?tour=\$\{encodeURIComponent\(tour\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
         expect(liveSrc).toMatch(/apiFetch\(`\/api\/livescore\?tour=\$\{encodeURIComponent\(t\)\}`,\s*\{\s*auth:\s*false,\s*includeResponse:\s*true,?\s*\}\)/);
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v49'/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v50'/);
         expect(swSrc).not.toMatch(/tw-v43/);
         expect(swSrc).not.toMatch(/peakOverlap/);
     });
@@ -147,7 +147,8 @@ describe('scores digest security contracts', () => {
         expect(scoresSrc).not.toMatch(/innerHTML[\s\S]{0,40}tw-tour/);
         expect(scoresSrc).toMatch(/parseTour\(btn\.dataset\.tour\)/);
         expect(scoresSrc).toMatch(/writeStoredTour/);
-        expect(scoresSrc).toMatch(/\$\{currentTour\} live scores|\$\{currentTour\} scores/);
+        expect(scoresSrc).not.toMatch(/hubPageSub/);
+        expect(scoresSrc).toMatch(/encodeURIComponent\(tour\)/);
     });
 
     it('does not load Chart.js on Scores', () => {
@@ -196,9 +197,13 @@ describe('Scores is a flat list only', () => {
     });
 
     it('keeps compact header, tour toggle, category tabs, chips, and live status', () => {
-        expect(scoresHtml).toMatch(/id="hubEyebrow"/);
+        expect(scoresHtml).not.toMatch(/id="hubEyebrow"/);
+        expect(scoresHtml).not.toMatch(/id="hubPageSub"/);
+        expect(scoresHtml).not.toMatch(/class="section-subtitle"/);
+        expect(scoresHtml).not.toMatch(/class="hub-eyebrow"/);
         expect(scoresHtml).toMatch(/id="hubTournamentName"/);
-        expect(scoresHtml).toMatch(/id="hubPageSub"/);
+        expect(scoresSrc).toMatch(/scores-stale-banner/);
+        expect(scoresSrc).toMatch(/id = 'scoresStaleBanner'/);
         expect(scoresHtml).toMatch(/id="tourToggle"/);
         expect(scoresHtml).toMatch(/id="categoryTabs"/);
         expect(scoresHtml).toMatch(/data-filter="live"/);
@@ -725,9 +730,9 @@ describe('stale live scores', () => {
     });
 });
 
-describe('service worker tw-v49', () => {
+describe('service worker tw-v50', () => {
     it('bumps cache and still precaches scores.html without peakOverlap', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v49'/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v50'/);
         expect(swSrc).not.toMatch(/tw-v43/);
         expect(swSrc).toMatch(/'\/scores\.html'/);
         expect(swSrc).not.toMatch(/peakOverlap/);
