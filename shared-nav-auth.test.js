@@ -70,7 +70,7 @@ describe('scores hub XSS sinks', () => {
 
     it('calls hub and livescore as anonymous public GETs', () => {
         expect(scoresSrc).toMatch(/apiFetch\(`\/api\/hub\?tour=\$\{encodeURIComponent\(tour\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
-        expect(liveSrc).toMatch(/apiFetch\(`\/api\/livescore\?tour=\$\{encodeURIComponent\(t\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
+        expect(liveSrc).toMatch(/apiFetch\(`\/api\/livescore\?tour=\$\{encodeURIComponent\(t\)\}`,\s*\{\s*auth:\s*false,\s*includeResponse:\s*true,?\s*\}\)/);
         expect(scoresSrc).not.toMatch(/\/api\/fixtures/);
         expect(liveSrc).not.toMatch(/\/api\/fixtures/);
     });

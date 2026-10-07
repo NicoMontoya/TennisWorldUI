@@ -8,7 +8,7 @@
 //
 // Bump CACHE_VERSION to force all clients to re-install.
 
-const CACHE_VERSION  = 'tw-v48';
+const CACHE_VERSION  = 'tw-v49';
 const SHELL_CACHE    = CACHE_VERSION + '-shell';
 const API_CACHE      = CACHE_VERSION + '-api';
 
@@ -170,6 +170,8 @@ async function networkFirstWithCache(request, cacheName) {
             ? await cleanFetch(request)
             : await fetch(request);
         if (!response.ok) throw new Error('Network response not ok');
+        // Clone stores the full Response, including X-Fetched-At on
+        // /api/livescore. Do not rebuild the body without these headers.
         cache.put(request, response.clone());
         return response;
     } catch (_) {
