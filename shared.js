@@ -226,7 +226,19 @@ function clearSwApiCache() {
 }
 
 // ── Service worker registration ───────────────────────────────────────────────
-if ('serviceWorker' in navigator) {
+// The Sprint 1 preview document must not register a service worker. Sample
+// modules stay out of the shell cache, and the preview origin does not gain
+// an API cache. The hostname gate is what keeps fixtures off production;
+// skipping registration is the cache boundary.
+function isSprint1PreviewDocument() {
+    try {
+        return document.documentElement.getAttribute('data-tw-preview') === 'sprint1';
+    } catch (e) {
+        return false;
+    }
+}
+
+if ('serviceWorker' in navigator && !isSprint1PreviewDocument()) {
     window.addEventListener('load', function () {
         // Unregister any stale SW first, then register the current one.
         // This one-time sweep clears the old cache-first-for-JS/CSS version.
