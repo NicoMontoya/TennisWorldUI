@@ -204,7 +204,9 @@ describe('shell data and view', () => {
     it('defaults Schedule to Now and falls forward only when Now is empty', () => {
         const view = sampleView({ ...base, tour: 'ATP' });
         expect(view.schedule.segment).toBe('now');
-        expect(view.schedule.cards.map((card) => card.id)).toEqual(['sample-hard']);
+        expect(view.schedule.cards.map((card) => card.id)).toEqual(['sample-hard', 'sample-wta']);
+        expect(view.schedule.lowerCards).toEqual([]);
+        expect(view.schedule.seasonOver).toBe('');
         const past = sampleView({ ...base, segment: 'past' });
         expect(past.schedule.cards.map((card) => card.id)).toEqual(['sample-clay']);
         const next = sampleView({ ...base, segment: 'upnext' });
@@ -334,7 +336,7 @@ describe('preview server and cache boundaries', () => {
         const shared = read('./shared.js');
         const page = read('./sprint1.html');
         const app = read('./shell/sprint1.js');
-        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v51'/);
+        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v52'/);
         expect(sw).toMatch(/pathname === '\/sprint1\.html'/);
         expect(sw).toMatch(/pathname\.startsWith\('\/shell\/'\)/);
         expect(sw).not.toMatch(/SHELL_ASSETS[\s\S]*fixtures\.js/);
@@ -342,7 +344,7 @@ describe('preview server and cache boundaries', () => {
         expect(shared).toMatch(/data-tw-preview'\) === 'sprint1'/);
         expect(page).toMatch(/noindex, nofollow/);
         expect(page).toMatch(/src="\/shared\.js"/);
-        expect(page).toMatch(/src="\/shell\/sprint1\.js\?v=tw51"/);
+        expect(page).toMatch(/src="\/shell\/sprint1\.js\?v=tw52"/);
         expect(page).not.toMatch(/src="shared\.js"/);
         expect(page).not.toMatch(/cloudflareinsights|innerHTML/);
         expect(app).not.toMatch(/innerHTML|apiFetch|insertAdjacentHTML/);

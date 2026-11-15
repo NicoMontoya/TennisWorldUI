@@ -1,6 +1,10 @@
 // Status and clock formatting for the Sprint 1 shell.
 // Match phase is derived from startsAtUtc, a strict isLive boolean, and winnerId.
-// A status string on the object is ignored.
+// A status string on the object is ignored. A missing start is Time TBA,
+// never a clock invented from the date or time fields.
+
+export const SCHEDULE_UPDATING = 'Schedule is updating. Check back soon.';
+export const LOWER_TIER_HEADING = 'Challengers & ITF';
 
 const ROUND_LABELS = {
     4: 'R128',
@@ -12,8 +16,84 @@ const ROUND_LABELS = {
     12: 'F',
 };
 
-export function roundLabel(roundId) {
-    return ROUND_LABELS[Number(roundId)] || 'Round';
+const TOUR_ROUND_NAMES = {
+    4: 'Round of 128',
+    5: 'Round of 64',
+    6: 'Round of 32',
+    7: 'Round of 16',
+    9: 'Quarterfinals',
+    10: 'Semifinals',
+    12: 'Final',
+};
+
+const FULL_FROM_TEXT = {
+    'round of 128': 'Round of 128',
+    r128: 'Round of 128',
+    'round of 64': 'Round of 64',
+    r64: 'Round of 64',
+    'round of 32': 'Round of 32',
+    r32: 'Round of 32',
+    'round of 16': 'Round of 16',
+    r16: 'Round of 16',
+    quarterfinals: 'Quarterfinals',
+    quarterfinal: 'Quarterfinals',
+    'quarter-finals': 'Quarterfinals',
+    '1/4-finals': 'Quarterfinals',
+    qf: 'Quarterfinals',
+    semifinals: 'Semifinals',
+    semifinal: 'Semifinals',
+    'semi-finals': 'Semifinals',
+    '1/2-finals': 'Semifinals',
+    sf: 'Semifinals',
+    final: 'Final',
+    finals: 'Final',
+};
+
+const TIER_VALUES = new Set(['tour', 'challenger', 'itf']);
+
+// Grouping uses the fixtures `tier` field only. Names and eventType never
+// decide tour vs challenger vs ITF. Missing or unknown values are not tour.
+export function readTier(row) {
+    const explicit = String(row && row.tier == null ? '' : row.tier).trim().toLowerCase();
+    return TIER_VALUES.has(explicit) ? explicit : '';
+}
+
+export function roundLabel(roundId, context) {
+    const id = Number(roundId);
+    const tier = context && context.tier;
+    if ((tier === 'challenger' || tier === 'itf') && id === 4) return 'R1';
+    if (tier === 'tour') {
+        const text = String(context && context.round || '').trim();
+        const mapped = FULL_FROM_TEXT[text.toLowerCase()];
+        if (mapped) return mapped;
+        if (text) return text;
+        return TOUR_ROUND_NAMES[id] || 'Round';
+    }
+    if (tier === 'challenger' || tier === 'itf') {
+        const text = String(context && context.round || '').trim();
+        if (text) return text;
+    }
+    return ROUND_LABELS[id] || 'Round';
+}
+
+// 1970-01-01 is the upstream sentinel for "no fetch time", not a real stamp.
+export function isIgnoredFetchedAt(value) {
+    if (value == null || value === '') return true;
+    let parsed;
+    if (value instanceof Date) parsed = value.getTime();
+    else if (typeof value === 'number') parsed = value;
+    else parsed = Date.parse(value);
+    if (Number.isNaN(parsed)) return true;
+    return parsed < Date.UTC(1980, 0, 1);
+}
+
+export function chooseFetchedAt(candidates, fetchTimeMs) {
+    const list = Array.isArray(candidates) ? candidates : [candidates];
+    for (let i = 0; i < list.length; i += 1) {
+        if (!isIgnoredFetchedAt(list[i])) return new Date(Date.parse(list[i])).toISOString();
+    }
+    if (!isIgnoredFetchedAt(fetchTimeMs)) return new Date(fetchTimeMs).toISOString();
+    return null;
 }
 
 export function localDateISO(now, timeZone) {
@@ -47,6 +127,7 @@ export function formatCalendarRange(startDate, endDate) {
 }
 
 export function formatStartLocal(iso, timeZone) {
+    if (iso == null || iso === '') return null;
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return null;
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -69,9 +150,67 @@ export function formatStartLocal(iso, timeZone) {
 }
 
 export function formatAsOf(iso, timeZone) {
+    if (isIgnoredFetchedAt(iso)) return '';
     const local = formatStartLocal(iso, timeZone);
     if (!local) return '';
     return `as of ${local.date}, ${local.time} ${local.zone}`;
+}
+
+export function formatTbaLabel(dateValue, timeZone) {
+    const day = dayLabel(dateValue, timeZone);
+    return day ? `${day} · Time TBA` : 'Time TBA';
+}
+
+function dayLabel(dateValue, timeZone) {
+    const raw = String(dateValue || '').trim();
+    if (!raw) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return formatCalendarDate(raw);
+    const parsed = Date.parse(raw);
+    if (Number.isNaN(parsed)) return '';
+    return new Intl.DateTimeFormat('en-US', {
+        timeZone: timeZone || 'UTC',
+        month: 'short',
+        day: 'numeric',
+    }).format(new Date(parsed));
+}
+
+export function hasStartsAt(match) {
+    if (!match || match.startsAtUtc == null || match.startsAtUtc === '') return false;
+    return !Number.isNaN(Date.parse(match.startsAtUtc));
+}
+
+export function matchCalendarDay(match, timeZone) {
+    if (!match) return '';
+    if (hasStartsAt(match)) return localDateISO(match.startsAtUtc, timeZone);
+    const raw = String(match.date || match.day || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    const prefixed = /^(\d{4}-\d{2}-\d{2})/.exec(raw);
+    if (prefixed && !raw.includes('T')) return prefixed[1];
+    const parsed = Date.parse(raw);
+    if (Number.isNaN(parsed)) return '';
+    return localDateISO(parsed, timeZone);
+}
+
+export function compareMatchOrder(a, b, timeZone) {
+    const dayA = matchCalendarDay(a, timeZone) || '9999-99-99';
+    const dayB = matchCalendarDay(b, timeZone) || '9999-99-99';
+    if (dayA !== dayB) return dayA < dayB ? -1 : 1;
+    const timedA = hasStartsAt(a);
+    const timedB = hasStartsAt(b);
+    if (timedA !== timedB) return timedA ? -1 : 1;
+    if (timedA && timedB) {
+        const diff = Date.parse(a.startsAtUtc) - Date.parse(b.startsAtUtc);
+        if (diff !== 0) return diff;
+    }
+    const idA = String((a && (a.id || a.matchKey)) || '');
+    const idB = String((b && (b.id || b.matchKey)) || '');
+    return idA.localeCompare(idB);
+}
+
+export function seasonOverLine(tournament) {
+    if (!tournament || !tournament.name) return '';
+    const date = formatCalendarDate(tournament.startDate);
+    return `Tour season's over, next up: ${tournament.name}${date ? ` ${date}` : ''}`;
 }
 
 export function isSameLocalDay(iso, now, timeZone) {
@@ -79,13 +218,13 @@ export function isSameLocalDay(iso, now, timeZone) {
 }
 
 export function deriveMatchPhase(match, now) {
-    if (!match || match.startsAtUtc == null) return 'unknown';
-    const start = Date.parse(match.startsAtUtc);
-    if (Number.isNaN(start)) return 'unknown';
-    const clock = now instanceof Date ? now.getTime() : Number(now);
+    if (!match) return 'unknown';
     const winner = match.winnerId != null && String(match.winnerId) !== '';
-    if (winner) return 'final';
+    if (winner || match.finished === true) return 'final';
     if (match.isLive === true) return 'live';
+    if (!hasStartsAt(match)) return 'scheduled';
+    const start = Date.parse(match.startsAtUtc);
+    const clock = now instanceof Date ? now.getTime() : Number(now);
     if (start > clock) return 'upcoming';
     return 'unconfirmed';
 }
@@ -100,8 +239,9 @@ export function tournamentBucket(tournament, matches, now, timeZone) {
 }
 
 export function defaultSegment(buckets) {
-    if (buckets.includes('now')) return 'now';
-    if (buckets.includes('upnext')) return 'upnext';
+    const list = buckets || [];
+    if (list.includes('now') || !list.length) return 'now';
+    if (list.includes('upnext')) return 'upnext';
     return 'past';
 }
 
@@ -112,6 +252,8 @@ export function tournamentChip(tournament, matches, now, timeZone) {
     const bucket = tournamentBucket(tournament, list, now, timeZone);
     const allFinal = list.length > 0 && phases.every((phase) => phase === 'final');
     if (allFinal || bucket === 'past') return { kind: 'final', text: 'Final' };
+    const allScheduled = list.length > 0 && phases.every((phase) => phase === 'scheduled');
+    if (allScheduled && bucket !== 'upnext') return { kind: 'scheduled', text: 'Scheduled' };
     if (bucket === 'upnext') {
         return { kind: 'starts', text: `Starts ${formatCalendarDate(tournament.startDate)}` };
     }

@@ -1,10 +1,11 @@
-// In-memory sample data, or an honest production hold.
-// Never fetches, never writes localStorage, Cache Storage, or D1.
+// In-memory sample data for the localhost preview.
+// The live schedule is loaded by liveFeed.js. This module never fetches
+// and never writes localStorage, Cache Storage, or D1.
 
 export const RELEASE_GATES = [
     'Invite codes are not checked in the browser. Redemption has to be single-use, stored hashed, and rate-limited on the server, or use a Nico-approved allowlist.',
     'Picks, profile, and leaderboard routes need server 401/403 unless the caller is signed in and a member. This preview does not decide membership.',
-    'Production ATP/WTA fixtures are still empty. Live readiness has not passed. The shared quota stop stays as it is. No backfill runs from this UI.',
+    'Schedule rows come from this site. An empty schedule says it is updating instead of showing a blank page.',
     'EXP-01 stays parked. This preview does not show model probabilities, estimates, or betting language.',
     'noindex is set on this preview. Existing public pages still ship index,follow until a site-wide v1 change.',
     'Picks do not save. There is no scoring write path in this preview.',

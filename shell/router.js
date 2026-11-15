@@ -9,7 +9,7 @@ const STATES = new Set(['ready', 'empty', 'error', 'stale']);
 
 export function safeId(value) {
     const text = String(value == null ? '' : value);
-    return /^[a-z0-9-]{1,64}$/.test(text) ? text : null;
+    return /^[A-Za-z0-9_-]{1,128}$/.test(text) ? text : null;
 }
 
 export function parseTour(value) {
