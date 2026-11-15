@@ -4,6 +4,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "ignore": "^7.0.14",
     "vitest": "^4.1.9"
   }
 }

@@ -1,7 +1,104 @@
-# Keep VCS / local junk out of Workers static assets
+# Workers static assets. TennisWorldAPI uploads this directory as-is.
+# Gitignore syntax. Publish only files the browser loads.
+# That includes HTML (sprint1.html included), shell/, components/ (not tests),
+# vendor/, sw.js, manifest.json, robots.txt, icons, CSS, and app JS
+# such as shared.js and auth.js.
+
+# VCS and OS junk
 .git
 .gitignore
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+# Secrets and local env. Examples stay unpublished too: they are not
+# loaded by the site and are an easy place for a real secret to land.
+.dev.vars
+.dev.vars.*
+.dev.vars*
+.env
+.env.*
+.env*
+.envrc
+.npmrc
+.yarnrc
+.yarnrc.yml
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Wrangler local state and worker config (this repo is the asset directory)
+.wrangler
+wrangler.toml
+wrangler.json
+wrangler.jsonc
+/_worker.js
+/_routes.json
+/functions
+
+# Dependencies and package metadata
 node_modules
+package.json
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
+npm-shrinkwrap.json
+
+# Editor, backup, and log junk
+*.bak
+*.orig
+*.rej
+*.swp
+*.swo
+*.swn
+*~
+.#*
+*.tmp
+*.log
+*.map
+
+# Test runner and local static-server config
+vitest.config.*
+vite.config.*
+vitest.workspace.*
+/serve.json
+
+# Tests and test-only modules.
+# scoreFormatters.js is imported only by scoreFormatters.test.js.
+# Pages run the copies in shared.js.
 *.test.js
+*.spec.js
+*.test.mjs
+*.spec.mjs
+*.test.cjs
+*.spec.cjs
+*.test.ts
+*.spec.ts
+__tests__
+__mocks__
+/test/
+/tests/
+/scoreFormatters.js
+
+# Local dev scripts, e.g. scripts/sprint1-preview.mjs.
+# This does not match shell/ (the preview UI the browser loads).
+scripts
+
+# Docs and plans the browser never requests
+*.md
 ISA.md
+LICENSE
+COPYING
+
+# Editor, CI, and coverage metadata
+.vscode
+.idea
+.cursor
+.github
+coverage
+
+# Unreferenced prototype. No page, module, or sw.js precache entry loads it.
+/script.js
