@@ -8,7 +8,7 @@
 //
 // Bump CACHE_VERSION to force all clients to re-install.
 
-const CACHE_VERSION  = 'tw-v50';
+const CACHE_VERSION  = 'tw-v51';
 const SHELL_CACHE    = CACHE_VERSION + '-shell';
 const API_CACHE      = CACHE_VERSION + '-api';
 
@@ -88,6 +88,15 @@ self.addEventListener('fetch', function (event) {
     // Skip non-GET and cross-origin requests
     if (event.request.method !== 'GET') return;
     if (url.origin !== self.location.origin && !url.hostname.includes('fonts.g')) return;
+
+    // Sprint 1 preview assets bypass the service worker entirely. Sample
+    // modules and the preview document must not land in the shell cache or
+    // the API cache. Fixtures are not precached in SHELL_ASSETS.
+    if (url.pathname === '/sprint1.html'
+        || url.pathname === '/sprint1'
+        || url.pathname.startsWith('/shell/')) {
+        return;
+    }
 
     // Personal endpoints: bypass the SW entirely. The API cache is shared and
     // keyed by URL only, so a per-user 200 must never be stored or replayed

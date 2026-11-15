@@ -115,7 +115,7 @@ describe('surface form rankings', () => {
     });
 
     it('bumps the shell cache so rankings.html is not stuck on the previous precache', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v50'/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v51'/);
         expect(rankingsHtml).toMatch(/styles\.css\?v=tw50/);
     });
 });
