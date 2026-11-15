@@ -1,12 +1,13 @@
-// Sprint 1 preview shell. DOM only: textContent / createElement.
+// Sprint 1 shell. DOM only: textContent / createElement.
 // Sample fixtures load with a dynamic import after the localhost gate.
-// This file does not call the network.
+// Otherwise the shell loads the same-origin schedule feed.
 
 import { loadShellData } from './dataSource.js';
+import { loadLiveFeed } from './liveFeed.js';
 import { applyNav, planClick } from './navPlan.js';
 import { sampleFixturesAllowed } from './previewGate.js';
 import { hrefFor, parseLocation, safeId } from './router.js';
-import { buildView, viewerFromUser } from './viewModel.js';
+import { SCHEDULE_UPDATING, buildView, viewerFromUser } from './viewModel.js';
 
 const main = document.getElementById('shellMain');
 const banner = document.getElementById('s1Banner');
@@ -16,9 +17,16 @@ const sheetBody = document.getElementById('sheetBody');
 const sheetTitle = document.getElementById('sheetTitle');
 
 let sampleModule = null;
+let liveFeed = null;
+let liveForce = false;
+let liveTimer = null;
+let paintToken = 0;
+let lowerOpen = false;
 let returnMatchId = null;
 let careerChart = null;
 let lastSheetOpen = false;
+
+const LIVE_REFRESH_MS = 30000;
 
 function zone() {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -126,8 +134,20 @@ function renderSkeleton() {
 
 function renderBanner(model) {
     clear(banner);
-    banner.appendChild(el('strong', 's1-banner-kicker', model.sample ? 'Sample data' : 'Preview off'));
-    banner.appendChild(el('p', 's1-banner-copy', model.banner));
+    if (model.sample) {
+        banner.hidden = false;
+        banner.appendChild(el('strong', 's1-banner-kicker', 'Sample data'));
+        banner.appendChild(el('p', 's1-banner-copy', model.banner));
+        return;
+    }
+    if (model.updating) {
+        banner.hidden = false;
+        banner.appendChild(el('p', 's1-banner-copy', model.banner || SCHEDULE_UPDATING));
+        if (model.asOf) banner.appendChild(el('p', 's1-banner-copy s1-time-muted', model.asOf));
+        banner.appendChild(button('error-retry-btn s1-hit', 'Try again', 'retry'));
+        return;
+    }
+    banner.hidden = true;
 }
 
 function renderStale(model) {
@@ -170,7 +190,7 @@ function renderMatch(row, sample) {
     meta.appendChild(el('span', null, row.round));
     meta.appendChild(el('span', `s1-chip s1-chip-${row.phase}`, row.chip));
     open.appendChild(meta);
-    open.appendChild(el('span', 's1-match-primary', row.primary));
+    open.appendChild(el('span', row.timeMuted ? 's1-match-primary s1-time-muted' : 's1-match-primary', row.primary));
     if (row.p1.rank || row.p2.rank) {
         open.appendChild(el('span', 's1-match-ranks', `${row.p1.rank} · ${row.p2.rank}`));
     }
@@ -210,7 +230,9 @@ function renderToday(host, model) {
 function renderSchedule(host, model) {
     const schedule = model.schedule;
     host.appendChild(el('h1', 's1-title', 'Schedule'));
-    renderTour(host, model);
+    if (!model.sample && model.asOf && !model.updating) {
+        host.appendChild(el('p', 's1-note s1-time-muted', model.asOf));
+    }
     const segments = el('div', 's1-segment');
     segments.setAttribute('role', 'tablist');
     segments.setAttribute('aria-label', 'Schedule range');
@@ -232,10 +254,22 @@ function renderSchedule(host, model) {
         months.appendChild(node);
     });
     host.appendChild(months);
+    if (schedule.seasonOver) host.appendChild(el('p', 's1-season-over', schedule.seasonOver));
     if (schedule.empty) host.appendChild(el('p', 's1-empty', schedule.empty));
     const grid = el('div', 's1-cards');
     schedule.cards.forEach((card) => grid.appendChild(renderCard(card, model.sample)));
     host.appendChild(grid);
+    if (schedule.lowerCards && schedule.lowerCards.length) {
+        const details = el('details', 's1-lower');
+        if (lowerOpen) details.open = true;
+        const summary = el('summary', 's1-lower-summary', schedule.lowerHeading || 'Challengers & ITF');
+        details.appendChild(summary);
+        const lowerGrid = el('div', 's1-cards');
+        schedule.lowerCards.forEach((card) => lowerGrid.appendChild(renderCard(card, model.sample)));
+        details.appendChild(lowerGrid);
+        details.addEventListener('toggle', () => { lowerOpen = details.open; });
+        host.appendChild(details);
+    }
 }
 
 function renderCard(card, sample) {
@@ -250,7 +284,9 @@ function renderCard(card, sample) {
             ? 'cal-card-status-live'
             : card.chipKind === 'final'
                 ? 'cal-card-status-done'
-                : 'cal-card-status-upcoming';
+                : card.chipKind === 'scheduled'
+                    ? 's1-chip-scheduled'
+                    : 'cal-card-status-upcoming';
         top.appendChild(el('span', chipClass, card.chip));
     }
     node.appendChild(top);
@@ -266,7 +302,7 @@ function renderTournament(host, model) {
     host.appendChild(button('s1-back s1-hit', 'Back', 'back'));
     if (!tournament || tournament.missing) {
         host.appendChild(el('h1', 's1-title', 'Tournament'));
-        host.appendChild(el('p', 's1-empty', 'No sample tournament for that link.'));
+        host.appendChild(el('p', 's1-empty', model.updating ? SCHEDULE_UPDATING : 'No tournament for that link.'));
         return;
     }
     if (model.sample) host.appendChild(el('p', 's1-kicker', 'Sample'));
@@ -320,22 +356,25 @@ function renderPlayer(host, model) {
     host.appendChild(button('s1-back s1-hit', 'Back', 'back'));
     if (!player || player.missing) {
         host.appendChild(el('h1', 's1-title', 'Player'));
-        host.appendChild(el('p', 's1-empty', 'No sample player for that link.'));
+        host.appendChild(el('p', 's1-empty', model.updating ? SCHEDULE_UPDATING : 'No player for that link.'));
         return;
     }
     if (model.sample) host.appendChild(el('p', 's1-kicker', 'Sample'));
     host.appendChild(el('h1', 's1-title', player.name));
     const move = el('p', `s1-move s1-move-${player.move.dir}`);
     move.appendChild(el('span', 's1-move-glyph', player.move.glyph));
-    move.appendChild(document.createTextNode(` ${player.rank} · ${player.move.text}`));
+    const rankBits = [player.rank, player.move && player.move.text].filter(Boolean).join(' · ');
+    if (rankBits) move.appendChild(document.createTextNode(` ${rankBits}`));
     host.appendChild(move);
-    host.appendChild(el('p', 's1-note', `${player.age} · ${player.country}`));
+    const meta = [player.age, player.country].filter(Boolean).join(' · ');
+    if (meta) host.appendChild(el('p', 's1-note', meta));
     if (player.next) {
         host.appendChild(el('h2', 's1-sub', 'Next match'));
         host.appendChild(renderMatch(player.next, model.sample));
     } else {
-        host.appendChild(el('p', 's1-empty', 'No sample match is scheduled next.'));
+        host.appendChild(el('p', 's1-empty', model.updating ? SCHEDULE_UPDATING : 'No match is scheduled next.'));
     }
+    if (!model.sample) return;
     renderForm(host, 'Sample form, last 10', player.form);
     host.appendChild(el('h2', 's1-sub', 'Sample surface record'));
     player.surfaces.forEach((line) => host.appendChild(el('p', 's1-record', line)));
@@ -363,7 +402,7 @@ function renderPlayer(host, model) {
     table.appendChild(body);
     host.appendChild(table);
     host.appendChild(el('h2', 's1-sub', 'Recent sample results'));
-    if (!player.recent.length) host.appendChild(el('p', 's1-empty', 'No sample results yet.'));
+    if (!player.recent.length) host.appendChild(el('p', 's1-empty', 'No results yet.'));
     player.recent.forEach((result) => host.appendChild(el('p', 's1-record', result.text)));
     host.appendChild(el('h2', 's1-sub', 'Sample head-to-head'));
     const h2h = el('div', 's1-h2h');
@@ -452,7 +491,7 @@ function mountH2H(host, payload) {
     if (!host) return;
     clear(host);
     if (!payload) {
-        host.appendChild(el('p', 's1-empty', 'No sample head-to-head.'));
+        host.appendChild(el('p', 's1-empty', 'No head-to-head.'));
         return;
     }
     if (window.TW && window.TW.H2HPresenter) {
@@ -472,7 +511,7 @@ function mountDraw(model) {
             host.appendChild(built.el);
             return;
         } catch (err) {
-            host.appendChild(el('p', 's1-empty', 'Sample draw could not be drawn.'));
+            host.appendChild(el('p', 's1-empty', 'Draw could not be drawn.'));
         }
     }
     model.tournament.matches.forEach((row) => host.appendChild(el('p', null, `${row.p1.name} vs ${row.p2.name}`)));
@@ -527,22 +566,27 @@ function renderSheet(model) {
     const data = model.sheet;
     sheetTitle.textContent = data.title;
     if (model.sample) sheetBody.appendChild(el('p', 's1-kicker', 'Sample'));
-    sheetBody.appendChild(el('p', 's1-match-primary', data.primary));
+    sheetBody.appendChild(el('p', data.timeMuted ? 's1-match-primary s1-time-muted' : 's1-match-primary', data.primary));
     sheetBody.appendChild(el('p', `s1-chip s1-chip-${data.phase}`, data.chip));
     [data.p1, data.p2].forEach((player, index) => {
         const block = el('div', 's1-sheet-player');
-        const name = link('s1-hit s1-sheet-name', `${player.name} ${player.rank}`, player.href, 'view');
+        const nameText = [player.name, player.rank].filter(Boolean).join(' ');
+        const name = link('s1-hit s1-sheet-name', nameText, player.href, 'view');
         block.appendChild(name);
         if (player.seed) block.appendChild(el('span', 's1-note', `Seed ${player.seed}`));
-        renderForm(block, 'Sample form, last 10', index === 0 ? data.form1 : data.form2);
-        const record = index === 0 ? data.surface1 : data.surface2;
-        if (record) block.appendChild(el('p', 's1-record', record));
+        if (model.sample) {
+            renderForm(block, 'Sample form, last 10', index === 0 ? data.form1 : data.form2);
+            const record = index === 0 ? data.surface1 : data.surface2;
+            if (record) block.appendChild(el('p', 's1-record', record));
+        }
         sheetBody.appendChild(block);
     });
-    const h2h = el('div', 's1-h2h');
-    h2h.id = 's1SheetH2h';
-    sheetBody.appendChild(h2h);
-    mountH2H(h2h, data.h2h);
+    if (model.sample) {
+        const h2h = el('div', 's1-h2h');
+        h2h.id = 's1SheetH2h';
+        sheetBody.appendChild(h2h);
+        mountH2H(h2h, data.h2h);
+    }
     const pick = button('s1-pick s1-hit', data.pickLabel, 'noop');
     pick.disabled = true;
     pick.setAttribute('aria-disabled', 'true');
@@ -585,17 +629,51 @@ function highlightNav(model) {
     });
 }
 
-function paint() {
+async function shellData(allowed, route) {
+    if (allowed) {
+        const now = sampleModule ? Date.parse(sampleModule.SAMPLE_NOW) : Date.now();
+        return loadShellData({
+            allowed: true,
+            state: route.state,
+            dataset: sampleModule ? sampleModule.buildSampleDataset() : null,
+            now,
+        });
+    }
+    const force = liveForce;
+    liveForce = false;
+    if (!liveFeed || force) {
+        try {
+            liveFeed = await loadLiveFeed({ now: Date.now() });
+        } catch (err) {
+            liveFeed = null;
+        }
+    }
+    if (liveFeed && liveFeed.shell) return liveFeed.shell;
+    return loadShellData({ allowed: false, state: 'ready', dataset: null, now: Date.now() });
+}
+
+function armLiveRefresh(allowed) {
+    if (allowed) {
+        if (liveTimer) clearInterval(liveTimer);
+        liveTimer = null;
+        return;
+    }
+    if (liveTimer) return;
+    liveTimer = setInterval(() => {
+        if (document.hidden) return;
+        liveForce = true;
+        paint();
+    }, LIVE_REFRESH_MS);
+}
+
+async function paint() {
+    const token = paintToken + 1;
+    paintToken = token;
     const allowed = gateOpen();
     const route = currentRoute();
-    const dataset = allowed && sampleModule ? sampleModule.buildSampleDataset() : null;
-    const now = allowed && sampleModule ? Date.parse(sampleModule.SAMPLE_NOW) : Date.now();
-    const data = loadShellData({
-        allowed,
-        state: allowed ? route.state : 'ready',
-        dataset,
-        now,
-    });
+    if (!allowed && !liveFeed) renderSkeleton();
+    const data = await shellData(allowed, route);
+    if (token !== paintToken) return;
     const model = buildView({
         data,
         route,
@@ -631,7 +709,8 @@ function paint() {
     }
     highlightNav(model);
     renderSheet(model);
-    document.title = model.sample ? 'TennisWorld — Sample preview' : 'TennisWorld — Preview';
+    document.title = model.sample ? 'TennisWorld — Sample preview' : 'TennisWorld';
+    armLiveRefresh(allowed);
 }
 
 function onClick(event) {
@@ -665,6 +744,7 @@ function onClick(event) {
             return;
         }
         if (action === 'retry') {
+            liveForce = true;
             go({ kind: 'filter', patch: { state: 'ready' } });
             return;
         }
@@ -764,6 +844,11 @@ main.addEventListener('scroll', () => {
     history.replaceState({ ...state, scrollY: main.scrollTop }, '');
 }, { passive: true });
 document.addEventListener('tw:auth-change', () => paint());
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden || gateOpen()) return;
+    liveForce = true;
+    paint();
+});
 
 async function boot() {
     renderSkeleton();

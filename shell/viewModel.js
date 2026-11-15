@@ -2,22 +2,31 @@
 // assigns them with textContent. No probabilities and no email field.
 
 import {
+    LOWER_TIER_HEADING,
+    SCHEDULE_UPDATING,
+    compareMatchOrder,
     defaultSegment,
     deriveMatchPhase,
     formatAsOf,
     formatCalendarRange,
     formatStartLocal,
-    isSameLocalDay,
+    formatTbaLabel,
+    hasStartsAt,
+    isIgnoredFetchedAt,
+    localDateISO,
+    matchCalendarDay,
     rankMoveLabel,
     roundLabel,
     scoreLine,
+    seasonOverLine,
     tournamentBucket,
     tournamentChip,
 } from './derive.js';
 import { hrefFor } from './router.js';
 
 const SAMPLE_BANNER = 'Sample data. Fictional players and tournaments. The Live chip follows the sample clock, not a real match. Not probabilities. Not personal records.';
-const HOLD_BANNER = 'Production fixtures are not loaded. ATP/WTA live data is empty, the shared quota stop is unchanged, and this page does not call the paid feed.';
+
+export { SCHEDULE_UPDATING };
 
 export function sanitizeDisplayName(first, last) {
     const raw = `${first || ''} ${last || ''}`.trim();
@@ -48,7 +57,7 @@ function playersById(players) {
 
 function playerSide(player, seed, route) {
     if (!player) {
-        return { id: '', name: 'Sample player', seed: seed || '', rank: '', href: '' };
+        return { id: '', name: 'Player', seed: seed || '', rank: '', href: '' };
     }
     return {
         id: player.id,
@@ -59,31 +68,52 @@ function playerSide(player, seed, route) {
     };
 }
 
+function labelRound(match, tournament) {
+    const tier = match && Object.prototype.hasOwnProperty.call(match, 'tierClass')
+        ? match.tierClass
+        : (tournament && tournament.tierClass);
+    return roundLabel(match && match.roundId, {
+        tier,
+        round: match && match.roundName,
+    });
+}
+
 function matchRow(match, tournament, players, route, now, timeZone) {
     const phase = deriveMatchPhase(match, now);
-    const local = formatStartLocal(match.startsAtUtc, timeZone);
+    const timed = hasStartsAt(match);
+    const local = timed ? formatStartLocal(match.startsAtUtc, timeZone) : null;
+    const tba = formatTbaLabel(match.date, timeZone);
     const p1 = players.get(match.player1Id);
     const p2 = players.get(match.player2Id);
+    const score = (phase === 'final' || phase === 'live') ? scoreLine(match) : '';
     let primary = '';
-    if (phase === 'final' || phase === 'live') primary = scoreLine(match);
-    if (!primary && local) primary = local.label;
-    if (phase === 'unconfirmed') primary = local ? `${local.label} · score unconfirmed` : 'Score unconfirmed';
+    let timeMuted = false;
+    if (score) primary = score;
+    else if (phase === 'unconfirmed' && local) primary = `${local.label} · score unconfirmed`;
+    else if (!timed) {
+        primary = tba;
+        timeMuted = true;
+    } else if (local) primary = local.label;
     const chip = phase === 'live'
         ? 'Live'
         : phase === 'final'
             ? 'Final'
-            : phase === 'upcoming'
-                ? 'Upcoming'
-                : 'Unconfirmed';
+            : phase === 'scheduled'
+                ? 'Scheduled'
+                : phase === 'upcoming'
+                    ? 'Upcoming'
+                    : 'Unconfirmed';
     return {
         id: match.id,
         href: hrefFor({ ...route, view: 'tournament', entityId: tournament.id, matchId: match.id }, route.fileMode ? '/sprint1.html' : '/today'),
-        round: roundLabel(match.roundId),
-        roundId: String(match.roundId),
+        round: labelRound(match, tournament),
+        roundId: match.roundId == null ? '' : String(match.roundId),
         phase,
         chip,
         primary,
-        startLabel: local ? local.label : '',
+        timeMuted,
+        picksLocked: !timed,
+        startLabel: local ? local.label : tba,
         surface: tournament.surface,
         tournamentId: tournament.id,
         tournamentName: tournament.name,
@@ -96,20 +126,33 @@ function cardModel(tournament, matches, route, now, timeZone) {
     const chip = tournamentChip(tournament, matches, now, timeZone);
     const bucket = tournamentBucket(tournament, matches, now, timeZone);
     const upcoming = matches
-        .filter((match) => deriveMatchPhase(match, now) === 'upcoming')
-        .sort((a, b) => Date.parse(a.startsAtUtc) - Date.parse(b.startsAtUtc));
-    const nextLocal = upcoming[0] ? formatStartLocal(upcoming[0].startsAtUtc, timeZone) : null;
+        .filter((match) => {
+            const phase = deriveMatchPhase(match, now);
+            return phase === 'upcoming' || phase === 'scheduled';
+        })
+        .sort((a, b) => compareMatchOrder(a, b, timeZone));
+    const next = upcoming[0];
+    let nextLabel = '';
+    if (next && hasStartsAt(next)) {
+        const nextLocal = formatStartLocal(next.startsAtUtc, timeZone);
+        if (nextLocal) nextLabel = `Next ${nextLocal.label}`;
+    } else if (next) {
+        nextLabel = formatTbaLabel(next.date, timeZone);
+    }
     return {
         id: tournament.id,
         name: tournament.name,
+        tour: tournament.tour,
         tier: tournament.tier,
+        tierClass: tournament.tierClass || '',
+        startDate: tournament.startDate || '',
         surface: tournament.surface,
         dates: formatCalendarRange(tournament.startDate, tournament.endDate),
         chip: chip.text,
         chipKind: chip.kind,
         bucket,
         month: String(tournament.startDate || '').slice(0, 7),
-        nextLabel: nextLocal ? `Next ${nextLocal.label}` : '',
+        nextLabel,
         href: hrefFor({
             ...route,
             view: 'tournament',
@@ -187,6 +230,8 @@ function drawModel(tournament, matches, players, now) {
         const p2 = players.get(match.player2Id);
         const row = {
             roundId: match.roundId,
+            roundName: match.roundName || '',
+            ...(Object.prototype.hasOwnProperty.call(match, 'tierClass') ? { tierClass: match.tierClass } : {}),
             matchKey: match.id,
             slotIndex: match.slotIndex,
             player1Key: p1 ? p1.id : '',
@@ -210,7 +255,7 @@ function drawModel(tournament, matches, players, now) {
     const rounds = [...groups.entries()]
         .sort((a, b) => b[0] - a[0])
         .map(([roundId, rows], index) => ({
-            round: roundLabel(roundId),
+            round: labelRound(rows[0], tournament),
             order: index,
             matches: rows,
         }));
@@ -227,8 +272,40 @@ function monthLabel(key) {
     }).format(new Date(Date.UTC(year, month - 1, 1)));
 }
 
+function tourRank(tour) {
+    return tour === 'WTA' ? 1 : 0;
+}
+
+function isTourTier(card) {
+    return card && card.tierClass === 'tour';
+}
+
+export function partitionSchedule(cards) {
+    const tour = [];
+    const lower = [];
+    (cards || []).forEach((card) => {
+        if (isTourTier(card)) tour.push(card);
+        else lower.push(card);
+    });
+    const byListing = (a, b) => tourRank(a.tour) - tourRank(b.tour)
+        || String(a.startDate).localeCompare(String(b.startDate))
+        || String(a.name).localeCompare(String(b.name));
+    tour.sort(byListing);
+    lower.sort(byListing);
+    return { tour, lower };
+}
+
+function nextTourEvent(tournaments, today) {
+    return (tournaments || [])
+        .filter((tournament) => tournament.tierClass === 'tour')
+        .filter((tournament) => tournament.startDate && tournament.startDate >= today)
+        .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate))
+            || tourRank(a.tour) - tourRank(b.tour)
+            || String(a.name).localeCompare(String(b.name)))[0] || null;
+}
+
 function scheduleModel(data, route, now, timeZone) {
-    const tourneys = (data.tournaments || []).filter((tournament) => tournament.tour === route.tour);
+    const tourneys = data.tournaments || [];
     const buckets = tourneys.map((tournament) => tournamentBucket(
         tournament,
         (data.matches || []).filter((match) => match.tournamentId === tournament.id),
@@ -236,7 +313,7 @@ function scheduleModel(data, route, now, timeZone) {
         timeZone,
     ));
     const segment = route.segment || defaultSegment(buckets);
-    const months = [...new Set(tourneys.map((tournament) => String(tournament.startDate).slice(0, 7)))].sort();
+    const months = [...new Set(tourneys.map((tournament) => String(tournament.startDate).slice(0, 7)).filter((key) => key.length === 7))].sort();
     const cards = tourneys.map((tournament) => cardModel(
         tournament,
         (data.matches || []).filter((match) => match.tournamentId === tournament.id),
@@ -244,9 +321,14 @@ function scheduleModel(data, route, now, timeZone) {
         now,
         timeZone,
     )).filter((card) => card.bucket === segment && (!route.month || card.month === route.month));
+    const grouped = partitionSchedule(cards);
+    const today = localDateISO(now, timeZone);
+    const seasonOver = grouped.tour.length ? '' : seasonOverLine(nextTourEvent(tourneys, today));
     let empty = '';
-    if (data.neverHadData) empty = 'No schedule has been stored yet.';
-    else if (!cards.length) empty = 'No sample tournaments in this range.';
+    if (!grouped.tour.length && !grouped.lower.length && !seasonOver) {
+        if (data.mode === 'sample' && data.neverHadData) empty = 'No schedule has been stored yet.';
+        else if (data.mode !== 'sample') empty = SCHEDULE_UPDATING;
+    }
     return {
         segment,
         segments: [
@@ -255,7 +337,10 @@ function scheduleModel(data, route, now, timeZone) {
             { id: 'upnext', label: 'Up Next' },
         ],
         months: months.map((key) => ({ key, label: monthLabel(key), active: route.month === key })),
-        cards,
+        cards: grouped.tour,
+        lowerCards: grouped.lower,
+        lowerHeading: LOWER_TIER_HEADING,
+        seasonOver,
         empty,
     };
 }
@@ -268,11 +353,13 @@ function todayModel(data, route, now, timeZone, viewer, players) {
     const rows = tourMatches.map((match) => {
         const tournament = data.tournaments.find((item) => item.id === match.tournamentId);
         return { match, row: matchRow(match, tournament, players, route, now, timeZone) };
-    }).sort((a, b) => Date.parse(a.match.startsAtUtc) - Date.parse(b.match.startsAtUtc));
+    }).sort((a, b) => compareMatchOrder(a.match, b.match, timeZone));
     const live = rows.filter((item) => item.row.phase === 'live').map((item) => item.row);
-    const upNext = rows.filter((item) => item.row.phase === 'upcoming' && isSameLocalDay(item.match.startsAtUtc, now, timeZone))
+    const today = localDateISO(now, timeZone);
+    const upNext = rows.filter((item) => (item.row.phase === 'upcoming' || item.row.phase === 'scheduled')
+        && matchCalendarDay(item.match, timeZone) === today)
         .map((item) => item.row);
-    const next = rows.find((item) => item.row.phase === 'upcoming');
+    const next = rows.find((item) => item.row.phase === 'upcoming' || item.row.phase === 'scheduled');
     const follows = (viewer.follows || []).map((favorite) => {
         const player = [...players.values()].find((item) => item.id === favorite.playerKey);
         return {
@@ -312,7 +399,9 @@ function rankingsModel(data, route, players) {
     return {
         tour: route.tour,
         rows,
-        empty: data.neverHadData ? 'No rankings have been stored yet.' : rows.length ? '' : 'No sample rankings for this tour.',
+        empty: data.neverHadData
+            ? (data.mode === 'sample' ? 'No rankings have been stored yet.' : SCHEDULE_UPDATING)
+            : rows.length ? '' : (data.mode === 'sample' ? 'No rankings for this tour.' : SCHEDULE_UPDATING),
     };
 }
 
@@ -322,8 +411,8 @@ function playerModel(data, route, players, now, timeZone) {
     const related = (data.matches || []).filter((match) => match.player1Id === player.id || match.player2Id === player.id);
     const next = related
         .map((match) => ({ match, phase: deriveMatchPhase(match, now) }))
-        .filter((item) => item.phase === 'live' || item.phase === 'upcoming')
-        .sort((a, b) => Date.parse(a.match.startsAtUtc) - Date.parse(b.match.startsAtUtc))[0];
+        .filter((item) => item.phase === 'live' || item.phase === 'upcoming' || item.phase === 'scheduled')
+        .sort((a, b) => compareMatchOrder(a.match, b.match, timeZone))[0];
     let nextRow = null;
     if (next) {
         const tournament = (data.tournaments || []).find((item) => item.id === next.match.tournamentId);
@@ -331,7 +420,7 @@ function playerModel(data, route, players, now, timeZone) {
     }
     const recent = related
         .filter((match) => deriveMatchPhase(match, now) === 'final')
-        .sort((a, b) => Date.parse(b.startsAtUtc) - Date.parse(a.startsAtUtc))
+        .sort((a, b) => compareMatchOrder(b, a, timeZone))
         .slice(0, 5)
         .map((match) => {
             const tournament = data.tournaments.find((item) => item.id === match.tournamentId);
@@ -339,7 +428,7 @@ function playerModel(data, route, players, now, timeZone) {
             const opponent = players.get(opponentId);
             const won = match.winnerId === player.id;
             return {
-                text: `${won ? 'W' : 'L'} vs ${opponent ? opponent.name : 'Sample player'} · ${scoreLine(match)} · ${tournament ? tournament.name : 'Sample'}`,
+                text: `${won ? 'W' : 'L'} vs ${opponent ? opponent.name : 'Player'} · ${scoreLine(match)} · ${tournament ? tournament.name : ''}`,
             };
         });
     const opponent = next
@@ -352,9 +441,9 @@ function playerModel(data, route, players, now, timeZone) {
     return {
         id: player.id,
         name: player.name,
-        rank: `#${player.rank}`,
+        rank: player.rank != null ? `#${player.rank}` : '',
         move: rankMoveLabel(player.rankMove),
-        age: `Age ${player.age}`,
+        age: player.age != null ? `Age ${player.age}` : '',
         country: player.country,
         form: formStrip(player),
         surfaces: ['hard', 'clay', 'grass'].map((surface) => surfaceRecord(player, surface)).filter(Boolean),
@@ -371,7 +460,7 @@ function tournamentModel(data, route, players, now, timeZone) {
     if (!tournament) return { missing: true };
     const matches = (data.matches || [])
         .filter((match) => match.tournamentId === tournament.id)
-        .sort((a, b) => a.slotIndex - b.slotIndex || Date.parse(a.startsAtUtc) - Date.parse(b.startsAtUtc));
+        .sort((a, b) => compareMatchOrder(a, b, timeZone));
     const rows = matches.map((match) => matchRow(match, tournament, players, route, now, timeZone));
     const rounds = [...new Set(rows.map((row) => row.roundId))];
     const visible = rows.filter((row) => {
@@ -389,10 +478,15 @@ function tournamentModel(data, route, players, now, timeZone) {
             { id: 'draw', label: 'Draw' },
             { id: 'results', label: 'Results' },
         ],
-        rounds: [{ id: 'all', label: 'All' }].concat(rounds.map((id) => ({ id, label: roundLabel(Number(id)) }))),
+        rounds: [{ id: 'all', label: 'All' }].concat(rounds.map((id) => {
+            const sample = matches.find((match) => String(match.roundId) === id);
+            return { id, label: labelRound(sample || { roundId: Number(id) }, tournament) };
+        })),
         round: route.round,
         matches: route.tab === 'draw' ? rows : visible,
-        empty: visible.length || route.tab === 'draw' ? '' : 'No sample matches in this round.',
+        empty: visible.length || route.tab === 'draw'
+            ? ''
+            : (data.mode === 'sample' ? 'No matches in this round.' : SCHEDULE_UPDATING),
         draw: drawModel(tournament, matches, players, now),
     };
 }
@@ -400,17 +494,23 @@ function tournamentModel(data, route, players, now, timeZone) {
 export function buildView({ data, route, now, timeZone, viewer }) {
     const sample = data.mode === 'sample';
     const players = playersById(data.players);
-    const clock = sample && Number.isFinite(now) ? now : data.now;
+    const clock = sample && Number.isFinite(now) ? now : (Number.isFinite(data.now) ? data.now : now);
     const bannerClock = sample && clock ? formatAsOf(new Date(clock).toISOString(), timeZone) : '';
+    const asOf = !sample && !isIgnoredFetchedAt(data.fetchedAt)
+        ? formatAsOf(data.fetchedAt, timeZone)
+        : '';
+    const updating = !sample && (data.neverHadData || Boolean(data.error));
     const baseRoute = { ...route, sample };
     const view = {
         mode: data.mode,
         sample,
+        updating,
+        asOf,
         banner: sample
             ? `${SAMPLE_BANNER} Sample clock ${bannerClock}.`
-            : HOLD_BANNER,
-        stale: data.stale && data.fetchedAt ? formatAsOf(new Date(data.fetchedAt).toISOString(), timeZone) : '',
-        error: data.error || '',
+            : (updating ? SCHEDULE_UPDATING : ''),
+        stale: sample && data.stale && data.fetchedAt ? formatAsOf(new Date(data.fetchedAt).toISOString(), timeZone) : '',
+        error: sample ? (data.error || '') : '',
         neverHadData: Boolean(data.neverHadData),
         tab: ['tournament', 'player'].includes(route.view) ? '' : route.view,
         view: route.view,
@@ -461,7 +561,7 @@ export function buildView({ data, route, now, timeZone, viewer }) {
         view.player = playerModel(data, baseRoute, players, clock, timeZone) || { missing: true };
     }
 
-    if (route.matchId && sample && !data.neverHadData) {
+    if (route.matchId && !data.neverHadData) {
         const match = (data.matches || []).find((item) => item.id === route.matchId);
         const tournament = match && (data.tournaments || []).find((item) => item.id === match.tournamentId);
         if (match && tournament) {
