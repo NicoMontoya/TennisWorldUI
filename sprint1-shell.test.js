@@ -222,7 +222,9 @@ describe('shell data and view', () => {
 
     it('keeps picks disabled and Me free of email', () => {
         const picks = sampleView(parseLocation('/picks', '?sample=1'));
-        expect(picks.picks.label).toBe('Picks open soon');
+        expect(picks.picks.gate).toBe('closed');
+        expect(picks.picks.teaser).toBe('Pick winners with friends and family. Invite-only.');
+        expect(picks.picks.action).toBe('Have an invite?');
         const user = viewerFromUser({
             firstName: 'Ada',
             lastName: 'Lovelace',
@@ -230,6 +232,7 @@ describe('shell data and view', () => {
             favorites: [{ playerKey: 'p-avery', name: 'Avery Sample', email: 'hidden@example.com' }],
         });
         expect(user.displayName).toBe('Ada Lovelace');
+        expect(user.member).toBe(false);
         expect(JSON.stringify(user)).not.toMatch(/@/);
         expect(sanitizeDisplayName('ada@example.com', '')).toBe('');
         const me = buildView({
@@ -237,11 +240,20 @@ describe('shell data and view', () => {
             route: { ...parseLocation('/me', '?sample=1'), sample: true },
             now: NOW,
             timeZone: ZONE,
-            viewer: { ...user, sampleSession: false },
+            viewer: { ...user, member: true, sampleSession: false },
         });
         expect(me.me.displayName).toBe('Ada Lovelace');
-        expect(me.me.recordNote).toBe('Pick record coming soon.');
+        expect(me.me.recordNote).toBe('Pick record coming soon');
         expect(JSON.stringify(me.me)).not.toMatch(/@/);
+        const memberPicks = buildView({
+            data: loadShellData({ allowed: true, state: 'ready', dataset: buildSampleDataset(), now: NOW }),
+            route: { ...parseLocation('/picks', '?sample=1'), sample: true },
+            now: NOW,
+            timeZone: ZONE,
+            viewer: { signedIn: true, member: true, displayName: 'Ada Lovelace', follows: [], sampleSession: false },
+        });
+        expect(memberPicks.picks.label).toBe('Picks open soon');
+        expect(memberPicks.picks.teaser).toBe('');
     });
 });
 
@@ -336,15 +348,15 @@ describe('preview server and cache boundaries', () => {
         const shared = read('./shared.js');
         const page = read('./sprint1.html');
         const app = read('./shell/sprint1.js');
-        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v52'/);
+        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v53'/);
         expect(sw).toMatch(/pathname === '\/sprint1\.html'/);
         expect(sw).toMatch(/pathname\.startsWith\('\/shell\/'\)/);
         expect(sw).not.toMatch(/SHELL_ASSETS[\s\S]*fixtures\.js/);
         expect(shared).toMatch(/isSprint1PreviewDocument/);
         expect(shared).toMatch(/data-tw-preview'\) === 'sprint1'/);
-        expect(page).toMatch(/noindex, nofollow/);
+        expect(page).toMatch(/noindex,nofollow/);
         expect(page).toMatch(/src="\/shared\.js"/);
-        expect(page).toMatch(/src="\/shell\/sprint1\.js\?v=tw52"/);
+        expect(page).toMatch(/src="\/shell\/sprint1\.js\?v=tw53"/);
         expect(page).not.toMatch(/src="shared\.js"/);
         expect(page).not.toMatch(/cloudflareinsights|innerHTML/);
         expect(app).not.toMatch(/innerHTML|apiFetch|insertAdjacentHTML/);

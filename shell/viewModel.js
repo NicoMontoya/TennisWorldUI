@@ -28,6 +28,29 @@ const SAMPLE_BANNER = 'Sample data. Fictional players and tournaments. The Live 
 
 export { SCHEDULE_UPDATING };
 
+export const GATE_COPY = {
+    meTitle: 'Me',
+    tabInvite: 'I have an invite',
+    tabSignIn: 'Sign in',
+    join: 'Join TennisWorld',
+    inviteOnly: 'TennisWorld is invite-only for now.',
+    redeem: 'Redeem invite',
+    record: 'Pick record coming soon',
+    signOut: 'Sign out',
+    edit: 'Edit',
+    followed: 'Followed players',
+    picksTitle: 'Picks',
+    teaser: 'Pick winners with friends and family. Invite-only.',
+    haveInvite: 'Have an invite?',
+    picksSoon: 'Picks open soon',
+};
+
+export function guestLine(displayName) {
+    const name = typeof displayName === 'string' ? displayName.trim() : '';
+    if (!name) return 'You\'re signed in. Picks and the leaderboard are invite-only.';
+    return `You're signed in as ${name}. Picks and the leaderboard are invite-only.`;
+}
+
 export function sanitizeDisplayName(first, last) {
     const raw = `${first || ''} ${last || ''}`.trim();
     if (raw.includes('@')) return '';
@@ -37,12 +60,14 @@ export function sanitizeDisplayName(first, last) {
 
 export function viewerFromUser(user) {
     if (!user || typeof user !== 'object') {
-        return { signedIn: false, displayName: '', follows: [], sampleSession: false };
+        return { signedIn: false, member: false, displayName: '', follows: [], sampleSession: false };
     }
     const follows = Array.isArray(user.favorites) ? user.favorites : [];
+    const named = sanitizeDisplayName(user.displayName, '') || sanitizeDisplayName(user.firstName, user.lastName);
     return {
         signedIn: true,
-        displayName: sanitizeDisplayName(user.firstName, user.lastName) || 'Member',
+        member: user.member === true,
+        displayName: named || 'Member',
         follows: follows.map((favorite) => ({
             playerKey: String(favorite.playerKey || ''),
             name: sanitizeDisplayName(favorite.name, '') || sanitizeDisplayName(favorite.firstName, favorite.lastName),
@@ -532,17 +557,30 @@ export function buildView({ data, route, now, timeZone, viewer }) {
     if (route.view === 'schedule') view.schedule = scheduleModel(data, baseRoute, clock, timeZone);
     if (route.view === 'rankings') view.rankings = rankingsModel(data, baseRoute, players);
     if (route.view === 'picks') {
-        view.picks = {
-            label: 'Picks open soon',
-            note: 'Scoring and saving picks are not in this preview. Membership for pick routes is a server gate, not a browser check.',
-        };
+        const member = Boolean(viewer.member);
+        view.picks = member
+            ? {
+                gate: 'member',
+                label: GATE_COPY.picksSoon,
+                teaser: '',
+                action: '',
+            }
+            : {
+                gate: 'closed',
+                label: '',
+                teaser: GATE_COPY.teaser,
+                action: GATE_COPY.haveInvite,
+            };
     }
     if (route.view === 'me') {
+        const signedIn = Boolean(viewer.signedIn);
+        const member = Boolean(viewer.member);
         view.me = {
-            signedIn: Boolean(viewer.signedIn),
+            signedIn,
+            member,
             sampleSession: Boolean(viewer.sampleSession),
-            displayName: viewer.signedIn ? viewer.displayName : '',
-            follows: viewer.signedIn
+            displayName: signedIn ? viewer.displayName : '',
+            follows: signedIn && member
                 ? (viewer.follows || []).map((favorite) => {
                     const player = [...players.values()].find((item) => item.id === favorite.playerKey);
                     return {
@@ -551,8 +589,13 @@ export function buildView({ data, route, now, timeZone, viewer }) {
                     };
                 })
                 : [],
-            signedOutNote: 'Sign in with the existing TennisWorld account dialog. Creating an account does not grant membership. Invite checks stay on the server.',
-            recordNote: 'Pick record coming soon.',
+            tabInvite: GATE_COPY.tabInvite,
+            tabSignIn: GATE_COPY.tabSignIn,
+            joinLabel: GATE_COPY.join,
+            inviteOnly: GATE_COPY.inviteOnly,
+            redeemLabel: GATE_COPY.redeem,
+            guestNote: signedIn && !member ? guestLine(viewer.displayName) : '',
+            recordNote: member ? GATE_COPY.record : '',
             sampleNote: viewer.sampleSession ? 'Sample sign-in. Not a real account and not stored.' : '',
         };
     }

@@ -12,7 +12,7 @@ const API_BASE = (() => {
     return ''; // same-origin
 })();
 
-// Public GET paths that must never send Authorization (tokens in access logs).
+// Public GET paths that stay anonymous. The session cookie is not a bearer token.
 const PUBLIC_GET_PATHS = ['/api/hub', '/api/livescore', '/api/calendar'];
 
 // Tour allowlist — ATP|WTA only. Same contract as API parseTour.
@@ -76,17 +76,18 @@ function normalizeNavPage(pathname) {
 
 // ── apiFetch ───────────────────────────────────────────────────────────────────
 // Returns payload on success, throws on hard error.
-// Pass { auth: false } to force an anonymous request (no Authorization header).
+// The session cookie is the only credential. Same-origin requests send it.
+// JSON bodies use Content-Type: application/json. Bearer tokens are not read.
 async function apiFetch(path, options = {}) {
     const { auth, headers: optHeaders, includeResponse, ...fetchOpts } = options;
-    const token = localStorage.getItem('tw-auth-token');
     const headers = { ...(optHeaders || {}) };
-    if (token && !isAnonymousPublicGet(path, options)) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
-    if (fetchOpts.body) headers['Content-Type'] = 'application/json';
+    if (fetchOpts.body != null && fetchOpts.body !== '') headers['Content-Type'] = 'application/json';
 
-    const res = await fetch(`${API_BASE}${path}`, { ...fetchOpts, headers });
+    const res = await fetch(`${API_BASE}${path}`, {
+        ...fetchOpts,
+        headers,
+        credentials: 'same-origin',
+    });
     if (!res.ok && res.status !== 401 && res.status !== 409) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (!json.ok) throw new Error(json.error || 'API error');
@@ -200,6 +201,15 @@ function formatGameScore(raw) {
     if (!raw) return '';
     return raw.replace(' - ', '–');
 }
+
+// Drop retired bearer-token keys once per page load. Never write them back.
+function clearLegacyAuthKeys() {
+    try {
+        localStorage.removeItem('tw-auth-token');
+        localStorage.removeItem('tw-auth-user');
+    } catch { /* private mode */ }
+}
+clearLegacyAuthKeys();
 
 // Drop every service-worker API cache (tw-vNN-api). That cache is shared and
 // keyed by URL, so a per-user response must not survive sign-out. Cache Storage

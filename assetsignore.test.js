@@ -111,7 +111,6 @@ const EXTRA_PUBLISH = [
     'sprint1.html',
     'sw.js',
     'shared.js',
-    'auth.js',
     'robots.txt',
     'manifest.json',
     'favicon.svg',
@@ -203,7 +202,6 @@ describe('.assetsignore', () => {
         expect(refs).toContain('shell/derive.js');
         expect(refs).toContain('vendor/chart.umd.min.js');
         expect(refs).toContain('shared.js');
-        expect(refs).toContain('auth.js');
         expect(refs).toContain('sw.js');
 
         for (const rel of refs) {

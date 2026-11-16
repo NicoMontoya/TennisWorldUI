@@ -7,7 +7,21 @@ import { loadLiveFeed } from './liveFeed.js';
 import { applyNav, planClick } from './navPlan.js';
 import { sampleFixturesAllowed } from './previewGate.js';
 import { hrefFor, parseLocation, safeId } from './router.js';
-import { SCHEDULE_UPDATING, buildView, viewerFromUser } from './viewModel.js';
+import { renderMe, renderPicks } from './account.js';
+import {
+    displayNameFromUser,
+    followsFromUser,
+    hintedStatus,
+    loadViewer,
+    loginAccount,
+    logoutAccount,
+    redeemInvite,
+    registerAccount,
+    saveDisplayName,
+    viewerFromSession,
+    NETWORK_ERROR,
+} from './session.js';
+import { SCHEDULE_UPDATING, buildView } from './viewModel.js';
 
 const main = document.getElementById('shellMain');
 const banner = document.getElementById('s1Banner');
@@ -25,6 +39,25 @@ let lowerOpen = false;
 let returnMatchId = null;
 let careerChart = null;
 let lastSheetOpen = false;
+let liveAccount = null;
+let sessionStarted = false;
+let cooldownTimer = null;
+
+const accountUi = {
+    tab: 'invite',
+    error: '',
+    submitting: false,
+    cooldownUntil: 0,
+    editing: false,
+    draft: '',
+    fields: {
+        inviteCode: '',
+        firstName: '',
+        email: '',
+        password: '',
+        redeemCode: '',
+    },
+};
 
 const LIVE_REFRESH_MS = 30000;
 
@@ -76,18 +109,180 @@ function currentRoute() {
     return route;
 }
 
-function viewerFor(allowed, route) {
+function cooldownLeft() {
+    if (!accountUi.cooldownUntil) return 0;
+    return Math.max(0, Math.ceil((accountUi.cooldownUntil - Date.now()) / 1000));
+}
+
+function armCooldown() {
+    if (cooldownTimer) return;
+    cooldownTimer = setInterval(() => {
+        const left = cooldownLeft();
+        const node = document.getElementById('s1Cooldown');
+        if (node) node.textContent = left > 0 ? `Try again in ${left}s` : '';
+        document.querySelectorAll('.s1-auth-submit').forEach((button) => {
+            button.disabled = left > 0 || accountUi.submitting;
+        });
+        if (left > 0) return;
+        clearInterval(cooldownTimer);
+        cooldownTimer = null;
+        accountUi.cooldownUntil = 0;
+        paint();
+    }, 1000);
+}
+
+function blankAccount(status) {
+    return {
+        status,
+        displayName: '',
+        follows: [],
+        error: '',
+        pending: false,
+        sampleSession: false,
+        sampleNote: '',
+    };
+}
+
+function startSession(allowed) {
+    if (allowed) return;
+    if (!liveAccount) {
+        liveAccount = { ...blankAccount(hintedStatus()), pending: true };
+    }
+    if (sessionStarted) return;
+    sessionStarted = true;
+    loadViewer().then((next) => {
+        liveAccount = { ...blankAccount(next.status), ...next, pending: false };
+        paint();
+    });
+}
+
+function accountFor(allowed, route) {
     if (allowed && route.session === 'sample') {
         const follows = sampleModule ? sampleModule.SAMPLE_FOLLOWS : [];
         return {
-            signedIn: true,
+            ...blankAccount('member'),
             displayName: 'Sample Member',
-            follows: follows.map((favorite) => ({ ...favorite })),
+            follows: follows.map((favorite) => ({ name: favorite.name })),
             sampleSession: true,
+            sampleNote: 'Sample sign-in. Not a real account and not stored.',
         };
     }
-    const user = window.TW && window.TW.auth ? window.TW.auth.user : null;
-    return viewerFromUser(user);
+    if (allowed) return blankAccount('signed-out');
+    startSession(false);
+    return liveAccount || blankAccount(hintedStatus());
+}
+
+function meScreen(account) {
+    return {
+        ...account,
+        tab: accountUi.tab,
+        error: accountUi.error || (account.status === 'offline' ? account.error : ''),
+        submitting: accountUi.submitting,
+        cooldown: cooldownLeft(),
+        editing: accountUi.editing,
+        draft: accountUi.draft,
+        fields: accountUi.fields,
+    };
+}
+
+function applyUser(user) {
+    const keepMember = user.member == null && liveAccount && liveAccount.status === 'member';
+    const member = user.member === true || keepMember;
+    liveAccount = {
+        ...blankAccount(member ? 'member' : 'guest'),
+        displayName: displayNameFromUser(user) || (liveAccount && liveAccount.displayName) || '',
+        follows: member ? followsFromUser(user) : [],
+        pending: false,
+    };
+}
+
+function accountActions() {
+    return {
+        onTab(tab) {
+            accountUi.tab = tab === 'signin' ? 'signin' : 'invite';
+            accountUi.error = '';
+            paint();
+        },
+        onField(name, value) {
+            if (Object.prototype.hasOwnProperty.call(accountUi.fields, name)) {
+                accountUi.fields[name] = value;
+            }
+        },
+        onDraft(value) {
+            accountUi.draft = value;
+        },
+        onEdit() {
+            accountUi.editing = true;
+            accountUi.draft = (liveAccount && liveAccount.displayName) || '';
+            accountUi.error = '';
+            paint();
+        },
+        onCancelEdit() {
+            accountUi.editing = false;
+            accountUi.error = '';
+            paint();
+        },
+        onJoin(body) { runAuth('join', body); },
+        onLogin(body) { runAuth('login', body); },
+        onRedeem(body) { runAuth('redeem', body); },
+        onSaveName(name) { runAuth('name', { displayName: name }); },
+        onSignOut() { runSignOut(); },
+    };
+}
+
+async function runAuth(kind, body) {
+    if (accountUi.submitting || cooldownLeft() > 0) return;
+    accountUi.submitting = true;
+    accountUi.error = '';
+    paint();
+    let result;
+    try {
+        if (kind === 'join') result = await registerAccount(body);
+        else if (kind === 'login') result = await loginAccount(body);
+        else if (kind === 'redeem') result = await redeemInvite(body);
+        else result = await saveDisplayName(body.displayName);
+    } catch {
+        result = { ok: false, status: 0, error: NETWORK_ERROR, cooldown: 0, user: null };
+    }
+    accountUi.submitting = false;
+    accountUi.fields.password = '';
+    if (!result || !result.ok) {
+        accountUi.error = (result && result.error) || NETWORK_ERROR;
+        if (result && result.cooldown) {
+            accountUi.cooldownUntil = Date.now() + result.cooldown * 1000;
+            armCooldown();
+        }
+        paint();
+        return;
+    }
+    accountUi.error = '';
+    accountUi.cooldownUntil = 0;
+    accountUi.editing = false;
+    accountUi.fields.inviteCode = '';
+    accountUi.fields.redeemCode = '';
+    if (result.user) applyUser(result.user);
+    else if (!liveAccount || liveAccount.pending) {
+        sessionStarted = false;
+        liveAccount = null;
+        startSession(false);
+    }
+    paint();
+}
+
+async function runSignOut() {
+    accountUi.submitting = true;
+    paint();
+    try {
+        await logoutAccount();
+    } catch {
+        /* The cookie clear is server-side; the screen still returns to signed out. */
+    }
+    accountUi.submitting = false;
+    accountUi.error = '';
+    accountUi.editing = false;
+    accountUi.tab = 'invite';
+    liveAccount = blankAccount('signed-out');
+    paint();
 }
 
 async function ensureSample(allowed) {
@@ -444,38 +639,15 @@ function renderRankings(host, model) {
     host.appendChild(table);
 }
 
-function renderPicks(host, model) {
-    host.appendChild(el('h1', 's1-title', 'Picks'));
-    if (model.sample) host.appendChild(el('p', 's1-kicker', 'Sample'));
-    host.appendChild(el('p', 's1-note', model.picks.note));
-    const disabled = button('s1-pick s1-hit', model.picks.label, 'noop');
-    disabled.disabled = true;
-    disabled.setAttribute('aria-disabled', 'true');
-    host.appendChild(disabled);
+function renderPicksScreen(host, account) {
+    renderPicks(host, {
+        status: account.status,
+        sampleNote: account.sampleNote,
+    });
 }
 
-function renderMe(host, model) {
-    const me = model.me;
-    host.appendChild(el('h1', 's1-title', 'Me'));
-    if (me.sampleNote) host.appendChild(el('p', 's1-kicker', me.sampleNote));
-    if (!me.signedIn) {
-        host.appendChild(el('p', 's1-note', me.signedOutNote));
-        host.appendChild(button('s1-pick s1-hit', 'Sign in', 'signin'));
-        if (model.sample) {
-            host.appendChild(el('p', 's1-note', 'The sample sign-in is a labeled preview of the signed-in layout. It is not an account and it is not saved.'));
-            host.appendChild(button('s1-secondary s1-hit', 'Preview sample sign-in', 'session', { session: 'sample' }));
-        }
-        return;
-    }
-    host.appendChild(el('p', 's1-identity', me.displayName));
-    host.appendChild(el('p', 's1-note', me.recordNote));
-    host.appendChild(el('h2', 's1-sub', 'Followed players'));
-    if (!me.follows.length) host.appendChild(el('p', 's1-empty', 'No followed players.'));
-    me.follows.forEach((favorite) => {
-        if (favorite.href) host.appendChild(link('s1-hit s1-follow-link', favorite.name, favorite.href, 'view'));
-        else host.appendChild(el('p', null, favorite.name));
-    });
-    if (me.sampleSession) host.appendChild(button('s1-secondary s1-hit', 'Leave sample sign-in', 'session', { session: '' }));
+function renderMeScreen(host, account) {
+    renderMe(host, meScreen(account), accountActions());
 }
 
 function renderGates(host, model) {
@@ -661,6 +833,8 @@ function armLiveRefresh(allowed) {
     if (liveTimer) return;
     liveTimer = setInterval(() => {
         if (document.hidden) return;
+        const route = currentRoute();
+        if (route.view === 'me' || route.view === 'picks') return;
         liveForce = true;
         paint();
     }, LIVE_REFRESH_MS);
@@ -671,6 +845,7 @@ async function paint() {
     paintToken = token;
     const allowed = gateOpen();
     const route = currentRoute();
+    const account = accountFor(allowed, route);
     if (!allowed && !liveFeed) renderSkeleton();
     const data = await shellData(allowed, route);
     if (token !== paintToken) return;
@@ -679,7 +854,7 @@ async function paint() {
         route,
         now: data.now,
         timeZone: zone(),
-        viewer: viewerFor(allowed, route),
+        viewer: viewerFromSession(account),
     });
     renderBanner(model);
     renderStale(model);
@@ -696,8 +871,8 @@ async function paint() {
     else if (model.view === 'tournament') renderTournament(screen, model);
     else if (model.view === 'player') renderPlayer(screen, model);
     else if (model.view === 'rankings') renderRankings(screen, model);
-    else if (model.view === 'picks') renderPicks(screen, model);
-    else if (model.view === 'me') renderMe(screen, model);
+    else if (model.view === 'picks') renderPicksScreen(screen, account);
+    else if (model.view === 'me') renderMeScreen(screen, account);
     renderGates(screen, model);
     main.appendChild(screen);
     if (model.view === 'tournament' && model.tournament && !model.tournament.missing && model.tournament.tab === 'draw') {
@@ -739,10 +914,6 @@ function onClick(event) {
     const route = currentRoute();
     if (actionNode) {
         const action = actionNode.dataset.action;
-        if (action === 'signin') {
-            if (window.TW && window.TW.auth) window.TW.auth.openModal('signin');
-            return;
-        }
         if (action === 'retry') {
             liveForce = true;
             go({ kind: 'filter', patch: { state: 'ready' } });
@@ -792,8 +963,6 @@ function onClick(event) {
 }
 
 function onKeydown(event) {
-    const auth = document.getElementById('authModal');
-    if (auth && auth.getAttribute('aria-hidden') === 'false') return;
     if (event.key === 'Escape' && !sheet.hidden) {
         event.preventDefault();
         go({ kind: 'close-sheet', pushed: Boolean(history.state && history.state.pushed) });
@@ -843,10 +1012,13 @@ main.addEventListener('scroll', () => {
     if (!state || !state.tw) return;
     history.replaceState({ ...state, scrollY: main.scrollTop }, '');
 }, { passive: true });
-document.addEventListener('tw:auth-change', () => paint());
 document.addEventListener('visibilitychange', () => {
     if (document.hidden || gateOpen()) return;
     liveForce = true;
+    if (currentRoute().view === 'me' || currentRoute().view === 'picks') {
+        sessionStarted = false;
+        startSession(false);
+    }
     paint();
 });
 

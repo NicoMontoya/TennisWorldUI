@@ -8,7 +8,7 @@
     <meta property="og:title" content="TennisWorld — My Profile">
     <meta property="og:description" content="Your TennisWorld profile — favorites, saved brackets, and account settings.">
     <meta property="og:type" content="website">
-    <meta name="robots" content="noindex">
+    <meta name="robots" content="noindex,nofollow">
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles.css?v=tw44">
     <link rel="manifest" href="manifest.json">
@@ -57,147 +57,17 @@
                     <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
                 </svg>
             </button>
-            <button class="nav-cta"><span>Sign In</span></button>
+            <a class="nav-cta" href="/me"><span>Sign in</span></a>
             </div>
         </div>
     </nav>
 
     <main class="profile-main" id="profileMain">
-
-        <!-- Loading state -->
-        <div class="profile-loading" id="profileLoading">
-            <div class="skeleton-line" style="width:4rem;height:4rem;border-radius:50%;margin:0 auto 1rem;"></div>
-            <div class="skeleton-line" style="width:12rem;height:1.5rem;margin:0 auto .5rem;"></div>
-            <div class="skeleton-line" style="width:8rem;height:.875rem;margin:0 auto;"></div>
+        <div class="profile-container" id="profileContent">
+            <h1 class="profile-name">Me</h1>
+            <p>Picks and the leaderboard are invite-only.</p>
+            <a class="profile-save-btn" href="/me">Me</a>
         </div>
-
-        <!-- Profile content (hidden until data loads) -->
-        <div class="profile-container" id="profileContent" style="display:none">
-
-            <!-- Hero -->
-            <div class="profile-hero">
-                <div class="profile-avatar-lg" id="profileAvatar"></div>
-                <div class="profile-hero-info">
-                    <h1 class="profile-name" id="profileName"></h1>
-                    <p class="profile-email-display" id="profileEmailDisplay"></p>
-                    <p class="profile-since" id="profileSince"></p>
-                </div>
-            </div>
-
-            <!-- Account Details -->
-            <section class="profile-card" id="detailsCard">
-                <div class="profile-card-header">
-                    <h2 class="profile-card-title">Account Details</h2>
-                    <button class="profile-action-btn" id="detailsEditBtn">Edit</button>
-                </div>
-
-                <!-- Read view -->
-                <div id="detailsView">
-                    <div class="profile-field-grid">
-                        <div class="profile-field">
-                            <span class="profile-field-label">First name</span>
-                            <span class="profile-field-value" id="viewFirst"></span>
-                        </div>
-                        <div class="profile-field">
-                            <span class="profile-field-label">Last name</span>
-                            <span class="profile-field-value" id="viewLast"></span>
-                        </div>
-                        <div class="profile-field profile-field-full">
-                            <span class="profile-field-label">Email</span>
-                            <span class="profile-field-value" id="viewEmail"></span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Edit view -->
-                <form id="detailsForm" style="display:none" novalidate>
-                    <div class="profile-field-grid">
-                        <div class="profile-field">
-                            <label class="profile-field-label" for="editFirst">First name</label>
-                            <input class="profile-input" id="editFirst" type="text" autocomplete="given-name" required>
-                        </div>
-                        <div class="profile-field">
-                            <label class="profile-field-label" for="editLast">Last name</label>
-                            <input class="profile-input" id="editLast" type="text" autocomplete="family-name" required>
-                        </div>
-                        <div class="profile-field profile-field-full">
-                            <label class="profile-field-label">Email</label>
-                            <span class="profile-field-value profile-field-readonly" id="editEmailDisplay"></span>
-                        </div>
-                    </div>
-                    <p class="profile-form-error" id="detailsError"></p>
-                    <div class="profile-form-actions">
-                        <button type="button" class="profile-cancel-btn" id="detailsCancelBtn">Cancel</button>
-                        <button type="submit" class="profile-save-btn" id="detailsSaveBtn">Save Changes</button>
-                    </div>
-                </form>
-            </section>
-
-            <!-- Security -->
-            <section class="profile-card" id="securityCard">
-                <div class="profile-card-header">
-                    <h2 class="profile-card-title">Password</h2>
-                    <button class="profile-action-btn" id="passwordToggleBtn">Change</button>
-                </div>
-
-                <p class="profile-field-value" id="passwordHint" style="color:var(--text-muted);font-size:.875rem">
-                    Use a strong password you don't use elsewhere.
-                </p>
-
-                <form id="passwordForm" style="display:none" novalidate>
-                    <div class="profile-password-fields">
-                        <div class="profile-field">
-                            <label class="profile-field-label" for="pwCurrent">Current password</label>
-                            <input class="profile-input" id="pwCurrent" type="password" autocomplete="current-password" required>
-                        </div>
-                        <div class="profile-field">
-                            <label class="profile-field-label" for="pwNew">New password <span class="profile-hint">(min 6 characters)</span></label>
-                            <input class="profile-input" id="pwNew" type="password" autocomplete="new-password" required>
-                        </div>
-                        <div class="profile-field">
-                            <label class="profile-field-label" for="pwConfirm">Confirm new password</label>
-                            <input class="profile-input" id="pwConfirm" type="password" autocomplete="new-password" required>
-                        </div>
-                    </div>
-                    <p class="profile-form-error" id="passwordError"></p>
-                    <div class="profile-form-actions">
-                        <button type="button" class="profile-cancel-btn" id="passwordCancelBtn">Cancel</button>
-                        <button type="submit" class="profile-save-btn" id="passwordSaveBtn">Update Password</button>
-                    </div>
-                </form>
-            </section>
-
-            <!-- My Brackets -->
-            <section class="profile-card" id="myBracketsCard">
-                <div class="profile-card-header">
-                    <h2 class="profile-card-title">My Brackets</h2>
-                    <span class="profile-card-count" id="myBracketsCount"></span>
-                </div>
-                <div id="profileBrackets"></div>
-            </section>
-
-            <!-- Watch List -->
-            <section class="profile-card">
-                <div class="profile-card-header">
-                    <h2 class="profile-card-title">Watch List</h2>
-                    <span class="profile-card-count" id="watchlistCount"></span>
-                </div>
-                <div id="profileWatchlist"></div>
-            </section>
-
-            <!-- Sign Out -->
-            <div class="profile-signout-wrap">
-                <button class="profile-signout-btn" id="profileSignoutBtn">Sign Out</button>
-            </div>
-
-        </div>
-
-        <!-- Not signed in -->
-        <div class="profile-unauthenticated" id="profileUnauth" style="display:none">
-            <p>You need to be signed in to view your profile.</p>
-            <button class="profile-save-btn" id="profileSigninBtn">Sign In</button>
-        </div>
-
     </main>
 
     <footer class="footer">
@@ -222,7 +92,6 @@
     </footer>
 
     <script src="shared.js"></script>
-    <script src="auth.js"></script>
     <script src="components/RivalryArc.js"></script>
     <script src="player-panel.js"></script>
     <script src="components/store.js"></script>
