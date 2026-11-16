@@ -1,10 +1,23 @@
 // Status and clock formatting for the Sprint 1 shell.
 // Match phase is derived from startsAtUtc, a strict isLive boolean, and winnerId.
-// A status string on the object is ignored. A missing start is Time TBA,
-// never a clock invented from the date or time fields.
+// deriveMatchPhase ignores a status string so a stray label cannot move the phase.
+// resolveMatchStatus honors the fixtures enum when it is present and falls back
+// to isLive / winner / scores when the current payload omits those fields.
+// A missing start is Time TBA, never a clock invented from the date or time fields.
 
 export const SCHEDULE_UPDATING = 'Schedule is updating. Check back soon.';
+export const SCORES_BEHIND = 'Scores may be a few minutes behind.';
+export const STATUS_STALE_MS = 10 * 60 * 1000;
 export const LOWER_TIER_HEADING = 'Challengers & ITF';
+
+const MATCH_STATUSES = new Set([
+    'Not Started',
+    'Live',
+    'Delayed',
+    'Finished',
+    'Walkover',
+    'Cancelled',
+]);
 
 const ROUND_LABELS = {
     4: 'R128',
@@ -267,7 +280,155 @@ export function rankMoveLabel(move) {
     return { glyph: '↓', text: `Down ${Math.abs(n)}`, dir: 'down' };
 }
 
+export function formatSetScore(set) {
+    if (set == null || set === '') return '';
+    if (typeof set === 'string' || typeof set === 'number') return String(set).trim();
+    if (typeof set === 'object') {
+        const p1 = set.p1 != null ? set.p1 : set.player1;
+        const p2 = set.p2 != null ? set.p2 : set.player2;
+        if (p1 == null || p2 == null) return '';
+        return `${p1}-${p2}`;
+    }
+    return '';
+}
+
 export function scoreLine(match) {
-    if (!match || !Array.isArray(match.setScores) || !match.setScores.length) return '';
-    return match.setScores.map((set) => String(set)).join(' ');
+    if (!match || match.setScores == null || match.setScores === '') return '';
+    if (typeof match.setScores === 'string') return match.setScores.trim();
+    if (!Array.isArray(match.setScores) || !match.setScores.length) return '';
+    return match.setScores.map((set) => formatSetScore(set)).filter(Boolean).join(' ');
+}
+
+export function knownMatchStatus(value) {
+    const text = String(value == null ? '' : value).trim();
+    return MATCH_STATUSES.has(text) ? text : '';
+}
+
+export function winnerIdOf(match) {
+    if (!match) return '';
+    if (match.winnerId != null && String(match.winnerId) !== '') return String(match.winnerId);
+    const winner = match.winner;
+    if (typeof winner !== 'string') return '';
+    const text = winner.trim();
+    if (!text || text === 'player1' || text === 'player2' || text === 'First Player' || text === 'Second Player') {
+        return '';
+    }
+    return text;
+}
+
+// Display status. Live / Delayed / Finished / Walkover / Cancelled on the row
+// are authoritative. "Not Started" is not, when isLive or a winner is already
+// set — that is the current fixtures payload, which hard-codes Not Started.
+export function resolveMatchStatus(match) {
+    if (!match) return 'Not Started';
+    const explicit = knownMatchStatus(match.status);
+    if (explicit === 'Live' || explicit === 'Delayed' || explicit === 'Finished' || explicit === 'Walkover' || explicit === 'Cancelled') {
+        return explicit;
+    }
+    const winner = winnerIdOf(match) !== '';
+    const finished = match.finished === true || winner;
+    const live = match.isLive === true;
+    if (live && !finished) return 'Live';
+    if (finished) {
+        if (winner && scoreLine(match) === '') return 'Walkover';
+        return 'Finished';
+    }
+    return 'Not Started';
+}
+
+export function formatClock(iso, timeZone) {
+    if (iso == null || iso === '') return '';
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hour: 'numeric',
+        minute: '2-digit',
+    }).formatToParts(date);
+    const get = (type) => parts.find((part) => part.type === type)?.value || '';
+    return `${get('hour')}:${get('minute')} ${get('dayPeriod')}`.replace(/\s+/g, ' ').trim();
+}
+
+export function formatScheduleHeader(isoDate) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || ''));
+    if (!match) return 'Date TBA';
+    const utc = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    return new Intl.DateTimeFormat('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        timeZone: 'UTC',
+    }).format(utc);
+}
+
+export function scoresBehindNote(statusAsOf, now) {
+    if (statusAsOf == null || statusAsOf === '') return '';
+    const parsed = Date.parse(statusAsOf);
+    if (Number.isNaN(parsed)) return '';
+    const clock = now instanceof Date ? now.getTime() : Number(now);
+    if (!Number.isFinite(clock)) return '';
+    if (clock - parsed > STATUS_STALE_MS) return SCORES_BEHIND;
+    return '';
+}
+
+function statusBucket(match) {
+    const status = resolveMatchStatus(match);
+    if (status === 'Live') return 0;
+    if (status === 'Not Started' && hasStartsAt(match)) return 1;
+    if (status === 'Not Started') return 2;
+    if (status === 'Delayed') return 3;
+    return 4;
+}
+
+function startMs(match) {
+    if (!hasStartsAt(match)) return null;
+    return Date.parse(match.startsAtUtc);
+}
+
+// Live, then upcoming timed (ascending), then Time TBA, then Delayed,
+// then Final / Walkover / Cancelled (most recent start first).
+export function compareStatusOrder(a, b) {
+    const bucketA = statusBucket(a);
+    const bucketB = statusBucket(b);
+    if (bucketA !== bucketB) return bucketA - bucketB;
+    const timeA = startMs(a);
+    const timeB = startMs(b);
+    if (bucketA === 1 || bucketA === 3 || bucketA === 0) {
+        const left = timeA == null ? Number.POSITIVE_INFINITY : timeA;
+        const right = timeB == null ? Number.POSITIVE_INFINITY : timeB;
+        if (left !== right) return left - right;
+    } else if (bucketA === 4) {
+        const left = timeA == null ? Number.NEGATIVE_INFINITY : timeA;
+        const right = timeB == null ? Number.NEGATIVE_INFINITY : timeB;
+        if (left !== right) return right - left;
+    }
+    const idA = String((a && (a.id || a.matchKey)) || '');
+    const idB = String((b && (b.id || b.matchKey)) || '');
+    return idA.localeCompare(idB);
+}
+
+export function presentMatch(match, timeZone) {
+    const status = resolveMatchStatus(match);
+    const timed = hasStartsAt(match);
+    const score = scoreLine(match);
+    const clock = timed ? formatClock(match.startsAtUtc, timeZone) : '';
+    if (status === 'Live') {
+        return { status, slot: 'Live', slotKind: 'live', detail: score, timeText: '' };
+    }
+    if (status === 'Delayed') {
+        return { status, slot: 'Delayed', slotKind: 'delayed', detail: clock, timeText: '' };
+    }
+    if (status === 'Finished') {
+        return { status, slot: 'Final', slotKind: 'final', detail: score, timeText: '' };
+    }
+    if (status === 'Walkover') {
+        return { status, slot: 'W/O', slotKind: 'walkover', detail: '', timeText: '' };
+    }
+    if (status === 'Cancelled') {
+        return { status, slot: 'Cancelled', slotKind: 'cancelled', detail: '', timeText: '' };
+    }
+    if (!timed) {
+        return { status: 'Not Started', slot: 'Scheduled', slotKind: 'scheduled', detail: 'Time TBA', timeText: '' };
+    }
+    return { status: 'Not Started', slot: '', slotKind: 'time', detail: '', timeText: clock };
 }

@@ -5,22 +5,28 @@ import {
     LOWER_TIER_HEADING,
     SCHEDULE_UPDATING,
     compareMatchOrder,
+    compareStatusOrder,
     defaultSegment,
     deriveMatchPhase,
     formatAsOf,
     formatCalendarRange,
+    formatScheduleHeader,
     formatStartLocal,
     formatTbaLabel,
     hasStartsAt,
     isIgnoredFetchedAt,
     localDateISO,
     matchCalendarDay,
+    presentMatch,
     rankMoveLabel,
+    resolveMatchStatus,
     roundLabel,
     scoreLine,
+    scoresBehindNote,
     seasonOverLine,
     tournamentBucket,
     tournamentChip,
+    winnerIdOf,
 } from './derive.js';
 import { hrefFor } from './router.js';
 
@@ -103,6 +109,17 @@ function matchRow(match, tournament, players, route, now, timeZone) {
                 : phase === 'upcoming'
                     ? 'Upcoming'
                     : 'Unconfirmed';
+    const face = presentMatch(match, timeZone);
+    const side1 = playerSide(p1, match.player1Seed, route);
+    const side2 = playerSide(p2, match.player2Seed, route);
+    const winner = winnerIdOf(match);
+    const winnerSide = (face.status === 'Finished' || face.status === 'Walkover') && winner
+        ? (winner === side1.id ? 'p1' : winner === side2.id ? 'p2' : '')
+        : '';
+    const liveScore = scoreLine(match);
+    const liveLabel = face.status === 'Live'
+        ? `Live, ${side1.name} vs ${side2.name}, ${liveScore}`
+        : '';
     return {
         id: match.id,
         href: hrefFor({ ...route, view: 'tournament', entityId: tournament.id, matchId: match.id }, route.fileMode ? '/sprint1.html' : '/today'),
@@ -117,9 +134,88 @@ function matchRow(match, tournament, players, route, now, timeZone) {
         surface: tournament.surface,
         tournamentId: tournament.id,
         tournamentName: tournament.name,
-        p1: playerSide(p1, match.player1Seed, route),
-        p2: playerSide(p2, match.player2Seed, route),
+        p1: side1,
+        p2: side2,
+        status: face.status,
+        slot: face.slot,
+        slotKind: face.slotKind,
+        detail: face.detail,
+        timeText: face.timeText,
+        winnerSide,
+        liveLabel,
     };
+}
+
+function groupHref(tournament, route) {
+    return hrefFor({
+        ...route,
+        view: 'tournament',
+        entityId: tournament.id,
+        matchId: null,
+        tab: 'matches',
+        round: 'all',
+    }, route.fileMode ? '/sprint1.html' : '/today');
+}
+
+function groupSort(a, b) {
+    const tour = (a.tour === 'WTA' ? 1 : 0) - (b.tour === 'WTA' ? 1 : 0);
+    if (tour !== 0) return tour;
+    return String(a.name).localeCompare(String(b.name));
+}
+
+function groupsFromMatches(entries, route, now, timeZone, players) {
+    const byT = new Map();
+    entries.forEach(({ match, tournament }) => {
+        if (!byT.has(tournament.id)) byT.set(tournament.id, { tournament, matches: [] });
+        byT.get(tournament.id).matches.push(match);
+    });
+    return [...byT.values()].map(({ tournament, matches }) => ({
+        id: tournament.id,
+        name: tournament.name,
+        tour: tournament.tour,
+        tierClass: tournament.tierClass || '',
+        href: groupHref(tournament, route),
+        rows: matches
+            .slice()
+            .sort((a, b) => compareStatusOrder(a, b))
+            .map((match) => matchRow(match, tournament, players, route, now, timeZone)),
+    })).sort(groupSort);
+}
+
+function splitTierGroups(groups) {
+    const tour = [];
+    const lower = [];
+    (groups || []).forEach((group) => {
+        if (group.tierClass === 'tour') tour.push(group);
+        else lower.push(group);
+    });
+    return { tour, lower };
+}
+
+function compareDateKey(a, b) {
+    if (a === b) return 0;
+    if (!a) return 1;
+    if (!b) return -1;
+    return a < b ? -1 : 1;
+}
+
+function daysFromCards(cards, data, route, now, timeZone, players) {
+    const allowed = new Set((cards || []).map((card) => card.id));
+    const tournaments = new Map((data.tournaments || []).map((item) => [item.id, item]));
+    const byDate = new Map();
+    (data.matches || []).forEach((match) => {
+        if (!allowed.has(match.tournamentId)) return;
+        const tournament = tournaments.get(match.tournamentId);
+        if (!tournament) return;
+        const key = matchCalendarDay(match, timeZone) || '';
+        if (!byDate.has(key)) byDate.set(key, []);
+        byDate.get(key).push({ match, tournament });
+    });
+    return [...byDate.keys()].sort(compareDateKey).map((key) => ({
+        date: key,
+        label: key ? formatScheduleHeader(key) : 'Date TBA',
+        groups: groupsFromMatches(byDate.get(key), route, now, timeZone, players),
+    }));
 }
 
 function cardModel(tournament, matches, route, now, timeZone) {
@@ -304,7 +400,7 @@ function nextTourEvent(tournaments, today) {
             || String(a.name).localeCompare(String(b.name)))[0] || null;
 }
 
-function scheduleModel(data, route, now, timeZone) {
+function scheduleModel(data, route, now, timeZone, players) {
     const tourneys = data.tournaments || [];
     const buckets = tourneys.map((tournament) => tournamentBucket(
         tournament,
@@ -324,6 +420,8 @@ function scheduleModel(data, route, now, timeZone) {
     const grouped = partitionSchedule(cards);
     const today = localDateISO(now, timeZone);
     const seasonOver = grouped.tour.length ? '' : seasonOverLine(nextTourEvent(tourneys, today));
+    const days = daysFromCards(grouped.tour, data, route, now, timeZone, players);
+    const lowerDays = daysFromCards(grouped.lower, data, route, now, timeZone, players);
     let empty = '';
     if (!grouped.tour.length && !grouped.lower.length && !seasonOver) {
         if (data.mode === 'sample' && data.neverHadData) empty = 'No schedule has been stored yet.';
@@ -339,6 +437,8 @@ function scheduleModel(data, route, now, timeZone) {
         months: months.map((key) => ({ key, label: monthLabel(key), active: route.month === key })),
         cards: grouped.tour,
         lowerCards: grouped.lower,
+        days,
+        lowerDays,
         lowerHeading: LOWER_TIER_HEADING,
         seasonOver,
         empty,
@@ -360,6 +460,14 @@ function todayModel(data, route, now, timeZone, viewer, players) {
         && matchCalendarDay(item.match, timeZone) === today)
         .map((item) => item.row);
     const next = rows.find((item) => item.row.phase === 'upcoming' || item.row.phase === 'scheduled');
+    const visible = tourMatches.filter((match) => {
+        if (resolveMatchStatus(match) === 'Live') return true;
+        return matchCalendarDay(match, timeZone) === today;
+    }).map((match) => {
+        const tournament = data.tournaments.find((item) => item.id === match.tournamentId);
+        return tournament ? { match, tournament } : null;
+    }).filter(Boolean);
+    const split = splitTierGroups(groupsFromMatches(visible, route, now, timeZone, players));
     const follows = (viewer.follows || []).map((favorite) => {
         const player = [...players.values()].find((item) => item.id === favorite.playerKey);
         return {
@@ -375,6 +483,9 @@ function todayModel(data, route, now, timeZone, viewer, players) {
         emptyLiveText: 'No live matches right now.',
         nextScheduled: live.length === 0 && next ? next.row : null,
         follows,
+        groups: split.tour,
+        lowerGroups: split.lower,
+        scoresNote: scoresBehindNote(data.statusAsOf, now),
         followsNote: viewer.sampleSession
             ? 'Sample follows for the fictional member. Not your account.'
             : viewer.signedIn
@@ -460,7 +571,7 @@ function tournamentModel(data, route, players, now, timeZone) {
     if (!tournament) return { missing: true };
     const matches = (data.matches || [])
         .filter((match) => match.tournamentId === tournament.id)
-        .sort((a, b) => compareMatchOrder(a, b, timeZone));
+        .sort((a, b) => compareStatusOrder(a, b));
     const rows = matches.map((match) => matchRow(match, tournament, players, route, now, timeZone));
     const rounds = [...new Set(rows.map((row) => row.roundId))];
     const visible = rows.filter((row) => {
@@ -529,7 +640,7 @@ export function buildView({ data, route, now, timeZone, viewer }) {
     if (route.view === 'today' || data.neverHadData && route.view === 'today') {
         view.today = todayModel(data, baseRoute, clock, timeZone, viewer, players);
     }
-    if (route.view === 'schedule') view.schedule = scheduleModel(data, baseRoute, clock, timeZone);
+    if (route.view === 'schedule') view.schedule = scheduleModel(data, baseRoute, clock, timeZone, players);
     if (route.view === 'rankings') view.rankings = rankingsModel(data, baseRoute, players);
     if (route.view === 'picks') {
         view.picks = {

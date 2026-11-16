@@ -98,12 +98,12 @@ describe('TW Security acceptance checklist', () => {
         expect(scoresHtml).toContain('data-cf-beacon=\'{"token": "942ca2c26fd44a78b8f81b74b22f5f41"}\'');
     });
 
-    it('4. PUBLIC_GET hub/livescore/calendar unchanged; SW is tw-v52', () => {
+    it('4. PUBLIC_GET hub/livescore/calendar unchanged; SW is tw-v54', () => {
         const sharedSrc = readFileSync(new URL('./shared.js', import.meta.url), 'utf8');
         expect(sharedSrc).toMatch(/const PUBLIC_GET_PATHS = \['\/api\/hub', '\/api\/livescore', '\/api\/calendar'\]/);
         expect(scoresSrc).toMatch(/apiFetch\(`\/api\/hub\?tour=\$\{encodeURIComponent\(tour\)\}`,\s*\{\s*auth:\s*false\s*\}\)/);
         expect(liveSrc).toMatch(/apiFetch\(`\/api\/livescore\?tour=\$\{encodeURIComponent\(t\)\}`,\s*\{\s*auth:\s*false,\s*includeResponse:\s*true,?\s*\}\)/);
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v52'/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v54'/);
         expect(swSrc).not.toMatch(/tw-v43/);
         expect(swSrc).not.toMatch(/peakOverlap/);
     });
@@ -730,9 +730,9 @@ describe('stale live scores', () => {
     });
 });
 
-describe('service worker tw-v52', () => {
+describe('service worker tw-v54', () => {
     it('bumps cache and still precaches scores.html without peakOverlap', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v52'/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v54'/);
         expect(swSrc).not.toMatch(/tw-v43/);
         expect(swSrc).toMatch(/'\/scores\.html'/);
         expect(swSrc).not.toMatch(/peakOverlap/);

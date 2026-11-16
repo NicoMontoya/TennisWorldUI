@@ -360,9 +360,9 @@ describe('winner / set formatting + XSS', () => {
     });
 });
 
-describe('service worker tw-v52', () => {
+describe('service worker tw-v54', () => {
     it('precaches H2HPresenter and bumps the shell cache', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v52'/);
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v54'/);
         expect(swSrc).toMatch(/'\/components\/H2HPresenter\.js'/);
         expect(swSrc).toMatch(/'\/components\/RivalryArc\.js'/);
         expect(swSrc).not.toMatch(/tw-v43/);
