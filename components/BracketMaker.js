@@ -263,64 +263,18 @@ window.TW = window.TW || {};
         }
 
         // ── Save to account (server bracket — one active per tournament) ──────
-        async function saveToAccount() {
-            if (!(window.TW.auth && TW.auth.isLoggedIn)) {
-                controls.flashStatus('Sign in to save your bracket');
-                if (window.TW.auth && TW.auth.openModal) TW.auth.openModal('signin');
-                return;
-            }
-            const pruned = bp.pruneInvalid(currentPicks(), cfg.officialDraw, SCRATCH);
-            if (!Object.keys(pruned).length) {
-                controls.flashStatus('Make some picks first');
-                return;
-            }
-            controls.setAccountBusy(true);
-            try {
-                await apiFetch('/api/bracket/save', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        tour: cfg.tour || 'ATP',
-                        tournamentKey: tk,
-                        season: String(cfg.year || ''),
-                        tournamentName: cfg.tournamentName || '',
-                        picks: pruned,
-                    }),
-                });
-                controls.flashStatus('Bracket saved! See how you rank under Leaders.');
-            } catch (e) {
-                controls.flashStatus('Save failed — try again');
-                console.warn('[BracketMaker] account save error', e);
-            } finally {
-                controls.setAccountBusy(false);
-            }
+        function saveToAccount() {
+            window.location.assign('/me');
         }
 
         // ── Leaders (per-tournament leaderboard) + read-only compare view ─────
-        async function loadLeaders() {
-            const qs = 'tournamentKey=' + encodeURIComponent(tk) + '&tour=' + encodeURIComponent(cfg.tour || 'ATP');
-            return apiFetch('/api/bracket/leaders?' + qs);
+        function loadLeaders() {
+            window.location.assign('/me');
+            return Promise.resolve({ leaders: [] });
         }
 
-        async function viewBracket(entry) {
-            try {
-                const qs = 'id=' + encodeURIComponent(entry.publicId) +
-                    '&tournamentKey=' + encodeURIComponent(tk) + '&tour=' + encodeURIComponent(cfg.tour || 'ATP');
-                const data = await apiFetch('/api/bracket/public?' + qs);
-                const mine = currentPicks();
-                let matches = 0;
-                for (const k of Object.keys(data.picks || {})) {
-                    if (mine[k] !== undefined && String(mine[k]) === String(data.picks[k])) matches++;
-                }
-                viewing = {
-                    name: data.displayName || 'Player',
-                    picks: data.picks || {},
-                    matches: matches,
-                    score: data.score, maxPossible: data.maxPossible,
-                };
-                renderNow();
-            } catch (e) {
-                controls.flashStatus('Could not load that bracket');
-            }
+        function viewBracket() {
+            window.location.assign('/me');
         }
 
         function exitViewing() {
@@ -656,23 +610,8 @@ window.TW = window.TW || {};
                     flashStatus('Copy saved locally');
                 }
             };
-            btnManage.onclick = function () {
-                if (panel.hidden) { renderPanel(ctx.cfg); panel.hidden = false; leadersPanel.hidden = true; }
-                else panel.hidden = true;
-            };
-            btnLeaders.onclick = async function () {
-                if (!leadersPanel.hidden) { leadersPanel.hidden = true; return; }
-                panel.hidden = true;
-                leadersPanel.hidden = false;
-                leadersPanel.innerHTML = '<div class="bm-panel-title">Bracket Leaders</div>' +
-                    '<div class="bm-panel-empty">Loading…</div>';
-                try {
-                    renderLeaders(await A.loadLeaders());
-                } catch (e) {
-                    leadersPanel.innerHTML = '<div class="bm-panel-title">Bracket Leaders</div>' +
-                        '<div class="bm-panel-empty">Could not load the leaderboard. Try again.</div>';
-                }
-            };
+            btnManage.onclick = function () { window.location.assign('/me'); };
+            btnLeaders.onclick = function () { window.location.assign('/me'); };
             btnClear.onclick = function () {
                 if (window.confirm('Reset all picks? Saved brackets are not affected.')) {
                     A.clearPicks();

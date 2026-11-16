@@ -7,7 +7,7 @@ export const RELEASE_GATES = [
     'Picks, profile, and leaderboard routes need server 401/403 unless the caller is signed in and a member. This preview does not decide membership.',
     'Schedule rows come from this site. An empty schedule says it is updating instead of showing a blank page.',
     'EXP-01 stays parked. This preview does not show model probabilities, estimates, or betting language.',
-    'noindex is set on this preview. Existing public pages still ship index,follow until a site-wide v1 change.',
+    'noindex, nofollow is set on every HTML page.',
     'Picks do not save. There is no scoring write path in this preview.',
 ];
 

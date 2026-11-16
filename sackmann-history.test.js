@@ -82,8 +82,8 @@ describe('Time Machine weekly rankings', () => {
 });
 
 describe('service worker', () => {
-    it('precaches home.js and the history client on tw-v52', () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v52'/);
+    it('precaches home.js and the history client on tw-v53', () => {
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v53'/);
         expect(swSrc).toMatch(/'\/home\.js'/);
         expect(swSrc).toMatch(/'\/rankings-history\.js'/);
         expect(swSrc).toMatch(/'\/player\.js'/);

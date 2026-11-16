@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TennisWorld — Career Trajectories</title>
     <meta name="description" content="Career trajectories by age — plus draws, rankings, and analytics for ATP and WTA tennis.">
-    <meta name="robots" content="index, follow">
+    <meta name="robots" content="noindex,nofollow">
     <link rel="canonical" href="https://tennisworld.dev/">
     <!-- Open Graph -->
     <meta property="og:type"        content="website">
@@ -82,7 +82,7 @@
                     <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
                 </svg>
             </button>
-            <button class="nav-cta"><span>Sign In</span></button>
+            <a class="nav-cta" href="/me"><span>Sign in</span></a>
             </div>
         </div>
     </nav>
@@ -171,7 +171,7 @@
                     <a href="scores.html">Scores</a>
                     <a href="rankings.html">Rankings</a>
                     <a href="draws.html">Draws & Brackets</a>
-                    <a href="profile.html">My Profile</a>
+                    <a href="/me">Me</a>
                 </div>
             </div>
         </div>
@@ -182,7 +182,6 @@
     </footer>
 
     <script src="shared.js"></script>
-    <script src="auth.js"></script>
     <script src="components/RivalryArc.js"></script>
     <script src="player-panel.js"></script>
     <script src="components/store.js"></script>
