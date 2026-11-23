@@ -348,7 +348,7 @@ describe('preview server and cache boundaries', () => {
         const shared = read('./shared.js');
         const page = read('./sprint1.html');
         const app = read('./shell/sprint1.js');
-        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v53'/);
+        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v54'/);
         expect(sw).toMatch(/pathname === '\/sprint1\.html'/);
         expect(sw).toMatch(/pathname\.startsWith\('\/shell\/'\)/);
         expect(sw).not.toMatch(/SHELL_ASSETS[\s\S]*fixtures\.js/);
@@ -356,7 +356,7 @@ describe('preview server and cache boundaries', () => {
         expect(shared).toMatch(/data-tw-preview'\) === 'sprint1'/);
         expect(page).toMatch(/noindex,nofollow/);
         expect(page).toMatch(/src="\/shared\.js"/);
-        expect(page).toMatch(/src="\/shell\/sprint1\.js\?v=tw53"/);
+        expect(page).toMatch(/src="\/shell\/sprint1\.js\?v=tw54"/);
         expect(page).not.toMatch(/src="shared\.js"/);
         expect(page).not.toMatch(/cloudflareinsights|innerHTML/);
         expect(app).not.toMatch(/innerHTML|apiFetch|insertAdjacentHTML/);

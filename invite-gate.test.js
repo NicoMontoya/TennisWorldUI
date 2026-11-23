@@ -331,9 +331,9 @@ describe('legacy sign-in is gone and pages are noindex', () => {
         expect(read('shell/session.js')).not.toMatch(/setItem\(\s*['"]tw-auth-/);
     });
 
-    it('bumps the service worker to tw-v53 and skips private API caches', () => {
+    it('bumps the service worker to tw-v54 and skips private API caches', () => {
         const sw = read('sw.js');
-        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v53'/);
+        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v54'/);
         expect(sw).toMatch(/\/api\/picks/);
         expect(sw).toMatch(/\/api\/leaderboard/);
         expect(sw).toMatch(/\/api\/me/);

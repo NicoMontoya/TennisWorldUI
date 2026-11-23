@@ -79,8 +79,12 @@ function loadServiceWorker() {
                 'tw-v50-other',
                 'tw-v51-api',
                 'tw-v51-shell',
+                'tw-v52-api',
+                'tw-v52-shell',
                 'tw-v53-api',
                 'tw-v53-shell',
+                'tw-v54-api',
+                'tw-v54-shell',
             ]);
         },
         delete(name) {
@@ -246,7 +250,7 @@ describe('service worker bracket bypass', () => {
         expect(sw.matches).toEqual([]);
     });
 
-    it('still network-first caches other public API GETs in tw-v53-api', async () => {
+    it('still network-first caches other public API GETs in tw-v54-api', async () => {
         const paths = [
             '/api/hub?tour=ATP',
             '/api/livescore?tour=ATP',
@@ -261,7 +265,7 @@ describe('service worker bracket bypass', () => {
             const res = await responded;
             expect(res.status).toBe(200);
             expect(await res.json()).toEqual({ ok: true, data: { source: 'network' } });
-            expect(sw.opened).toEqual(['tw-v53-api']);
+            expect(sw.opened).toEqual(['tw-v54-api']);
             expect(sw.puts.map((put) => put.url)).toEqual([ORIGIN + path]);
             expect(sw.fetchCalls).toHaveLength(1);
         }
@@ -301,13 +305,13 @@ describe('service worker bracket bypass', () => {
         sw.setNetwork(async () => new Response('denied', { status: 401 }));
         const res = await sw.handleFetch('/api/hub?tour=ATP');
         expect(await res.text()).toBe(cachedBody);
-        expect(sw.opened).toEqual(['tw-v53-api']);
+        expect(sw.opened).toEqual(['tw-v54-api']);
         expect(sw.puts).toEqual([]);
         expect(sw.matches).toEqual([ORIGIN + '/api/hub?tour=ATP']);
     });
 
-    it('activate deletes old API caches and keeps tw-v53 shell and api', async () => {
-        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v53'/);
+    it('activate deletes old API caches and keeps tw-v54 shell and api', async () => {
+        expect(swSrc).toMatch(/CACHE_VERSION\s*=\s*'tw-v54'/);
         const sw = loadServiceWorker();
         let waited;
         sw.listeners.activate({
@@ -323,6 +327,10 @@ describe('service worker bracket bypass', () => {
             'tw-v50-other',
             'tw-v51-api',
             'tw-v51-shell',
+            'tw-v52-api',
+            'tw-v52-shell',
+            'tw-v53-api',
+            'tw-v53-shell',
         ]);
         expect(sw.self.clients.claimed).toBe(true);
     });

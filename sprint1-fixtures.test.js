@@ -406,6 +406,7 @@ describe('live feed errors, as-of time, and text safety', () => {
 
         const shellFiles = [
             './shell/sprint1.js',
+            './shell/matchRow.js',
             './shell/liveFeed.js',
             './shell/viewModel.js',
             './shell/derive.js',

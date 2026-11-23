@@ -5,6 +5,7 @@
 import {
     SCHEDULE_UPDATING,
     chooseFetchedAt,
+    knownMatchStatus,
     readTier,
 } from './derive.js';
 import { RELEASE_GATES } from './dataSource.js';
@@ -52,6 +53,7 @@ function winnerKey(row) {
     const winner = row.winner;
     if (winner === 'player1' || winner === 'First Player') return row.player1Key || null;
     if (winner === 'player2' || winner === 'Second Player') return row.player2Key || null;
+    if (typeof winner === 'string' && winner.trim()) return winner.trim();
     if (row.winnerId != null && String(row.winnerId) !== '') return row.winnerId;
     return null;
 }
@@ -140,8 +142,19 @@ export function normalizeFixtures(fixtureRows, liveRows) {
         const tier = readTier(row);
         const tour = deriveTour(row);
         const live = liveByKey.get(String(row.matchKey));
-        const finished = finishedStatus(row.status) || finishedStatus(live && live.status);
-        const liveNow = !!(live && live.isLive === true) && !finished;
+        let status = knownMatchStatus(row.status);
+        const liveStatus = knownMatchStatus(live && live.status);
+        if ((status === '' || status === 'Not Started') && liveStatus && liveStatus !== 'Not Started') {
+            status = liveStatus;
+        }
+        const terminal = status === 'Finished' || status === 'Walkover' || status === 'Cancelled';
+        const finished = terminal || finishedStatus(row.status) || finishedStatus(live && live.status);
+        const liveNow = status === 'Live' || (
+            !terminal
+            && status !== 'Delayed'
+            && !finished
+            && (row.isLive === true || !!(live && live.isLive === true))
+        );
         const scores = setScoreList(live && live.setScores && live.setScores.length ? live.setScores : row.setScores);
         const start = usableStart(row.startsAtUtc);
         const day = calendarDay(row.date) || (start ? start.slice(0, 10) : '');
@@ -186,6 +199,7 @@ export function normalizeFixtures(fixtureRows, liveRows) {
             winnerId: winner == null ? null : String(winner),
             finished,
             setScores: scores,
+            status,
         });
     });
 
@@ -213,12 +227,13 @@ export function normalizeFixtures(fixtureRows, liveRows) {
     };
 }
 
-function shellFrom(dataset, fetchedAt, now, empty) {
+function shellFrom(dataset, fetchedAt, now, empty, statusAsOf) {
     const body = empty ? emptyDataset() : dataset;
     return {
         mode: 'live',
         now,
         fetchedAt: fetchedAt || null,
+        statusAsOf: typeof statusAsOf === 'string' ? statusAsOf : '',
         stale: false,
         error: empty ? SCHEDULE_UPDATING : null,
         neverHadData: empty,
@@ -233,10 +248,11 @@ function shellFrom(dataset, fetchedAt, now, empty) {
 
 export function liveShellFromFeed(feed, now) {
     const clock = Number.isFinite(now) ? now : Date.now();
+    const statusAsOf = feed && typeof feed.statusAsOf === 'string' ? feed.statusAsOf : '';
     if (!feed || !feed.ok || !feed.dataset || !feed.dataset.matches.length) {
-        return shellFrom(emptyDataset(), feed && feed.fetchedAt, clock, true);
+        return shellFrom(emptyDataset(), feed && feed.fetchedAt, clock, true, '');
     }
-    return shellFrom(feed.dataset, feed.fetchedAt, clock, false);
+    return shellFrom(feed.dataset, feed.fetchedAt, clock, false, statusAsOf);
 }
 
 async function readApi(fetchImpl, url) {
@@ -258,7 +274,9 @@ async function readApi(fetchImpl, url) {
             body = null;
         }
         const ok = !!(response && response.ok && body && body.ok === true && Array.isArray(body.data));
-        return { ok, rows: ok ? body.data : [], fetchedAtHeader: header };
+        const rawStamp = ok && body && typeof body.statusAsOf === 'string' ? body.statusAsOf : '';
+        const statusAsOf = rawStamp && !Number.isNaN(Date.parse(rawStamp)) ? rawStamp : '';
+        return { ok, rows: ok ? body.data : [], fetchedAtHeader: header, statusAsOf };
     } catch (err) {
         return { ok: false, rows: [], fetchedAtHeader: null };
     }
@@ -278,6 +296,7 @@ export async function loadLiveFeed(options = {}) {
     const feed = {
         ok: fixtures.ok && dataset.matches.length > 0,
         fetchedAt,
+        statusAsOf: fixtures.statusAsOf || '',
         dataset,
     };
     return { ...feed, shell: liveShellFromFeed(feed, now) };

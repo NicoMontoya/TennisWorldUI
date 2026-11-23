@@ -4,6 +4,7 @@
 
 import { loadShellData } from './dataSource.js';
 import { loadLiveFeed } from './liveFeed.js';
+import { buildMatchRow, chipModifier } from './matchRow.js';
 import { applyNav, planClick } from './navPlan.js';
 import { sampleFixturesAllowed } from './previewGate.js';
 import { hrefFor, parseLocation, safeId } from './router.js';
@@ -371,45 +372,48 @@ function renderTour(host, model) {
     host.appendChild(group);
 }
 
-function renderMatch(row, sample) {
-    const item = el('article', 's1-match');
-    item.dataset.phase = row.phase;
-    if (sample) item.appendChild(el('p', 's1-kicker', 'Sample'));
-    const open = link('s1-match-open s1-hit', '', row.href, 'sheet');
-    open.dataset.matchId = row.id;
-    open.appendChild(el('span', 's1-match-names', `${row.p1.name} vs ${row.p2.name}`));
-    const meta = el('span', 's1-match-meta');
-    if (row.p1.seed || row.p2.seed) {
-        meta.appendChild(el('span', null, `Seeds ${row.p1.seed || '–'} / ${row.p2.seed || '–'}`));
-    }
-    meta.appendChild(el('span', null, row.round));
-    meta.appendChild(el('span', `s1-chip s1-chip-${row.phase}`, row.chip));
-    open.appendChild(meta);
-    open.appendChild(el('span', row.timeMuted ? 's1-match-primary s1-time-muted' : 's1-match-primary', row.primary));
-    if (row.p1.rank || row.p2.rank) {
-        open.appendChild(el('span', 's1-match-ranks', `${row.p1.rank} · ${row.p2.rank}`));
-    }
-    item.appendChild(open);
-    return item;
+function renderMatch(row) {
+    return buildMatchRow(document, row);
+}
+
+function renderGroupList(host, groups) {
+    (groups || []).forEach((group) => {
+        const title = el('h3', 's1-group-title');
+        title.appendChild(link('s1-group-link', group.name, group.href, 'view'));
+        host.appendChild(title);
+        const list = el('div', 's1-rows');
+        (group.rows || []).forEach((row) => list.appendChild(renderMatch(row)));
+        host.appendChild(list);
+    });
+}
+
+function renderDayList(host, days) {
+    (days || []).forEach((day) => {
+        host.appendChild(el('h2', 's1-date-head', day.label));
+        renderGroupList(host, day.groups);
+    });
 }
 
 function renderToday(host, model) {
     const today = model.today;
     host.appendChild(el('h1', 's1-title', 'Today'));
     renderTour(host, model);
-    host.appendChild(el('h2', 's1-sub', 'Live now'));
-    if (today.emptyLive) {
+    if (today.scoresNote) host.appendChild(el('p', 's1-note s1-scores-note', today.scoresNote));
+    const tourGroups = today.groups || [];
+    const lowerGroups = today.lowerGroups || [];
+    if (!tourGroups.length && !lowerGroups.length) {
         host.appendChild(el('p', 's1-empty', today.emptyLiveText));
         if (today.nextScheduled) {
             host.appendChild(el('p', 's1-note', 'Next scheduled match'));
-            host.appendChild(renderMatch(today.nextScheduled, model.sample));
+            host.appendChild(renderMatch(today.nextScheduled));
         }
     } else {
-        today.live.forEach((row) => host.appendChild(renderMatch(row, model.sample)));
+        renderGroupList(host, tourGroups);
+        if (lowerGroups.length) {
+            host.appendChild(el('h2', 's1-sub', 'Challengers & ITF'));
+            renderGroupList(host, lowerGroups);
+        }
     }
-    host.appendChild(el('h2', 's1-sub', 'Up next today'));
-    if (!today.upNext.length) host.appendChild(el('p', 's1-empty', 'Nothing else is scheduled later today.'));
-    today.upNext.forEach((row) => host.appendChild(renderMatch(row, model.sample)));
     host.appendChild(el('h2', 's1-sub', 'Followed players'));
     if (today.followsNote) host.appendChild(el('p', 's1-note', today.followsNote));
     if (!today.follows.length && !today.followsNote) host.appendChild(el('p', 's1-empty', 'No followed players.'));
@@ -451,17 +455,26 @@ function renderSchedule(host, model) {
     host.appendChild(months);
     if (schedule.seasonOver) host.appendChild(el('p', 's1-season-over', schedule.seasonOver));
     if (schedule.empty) host.appendChild(el('p', 's1-empty', schedule.empty));
-    const grid = el('div', 's1-cards');
-    schedule.cards.forEach((card) => grid.appendChild(renderCard(card, model.sample)));
-    host.appendChild(grid);
-    if (schedule.lowerCards && schedule.lowerCards.length) {
+    if (schedule.days && schedule.days.length) {
+        renderDayList(host, schedule.days);
+    } else {
+        const grid = el('div', 's1-cards');
+        schedule.cards.forEach((card) => grid.appendChild(renderCard(card, model.sample)));
+        host.appendChild(grid);
+    }
+    const lowerDays = schedule.lowerDays || [];
+    const lowerCards = schedule.lowerCards || [];
+    if (lowerDays.length || lowerCards.length) {
         const details = el('details', 's1-lower');
         if (lowerOpen) details.open = true;
         const summary = el('summary', 's1-lower-summary', schedule.lowerHeading || 'Challengers & ITF');
         details.appendChild(summary);
-        const lowerGrid = el('div', 's1-cards');
-        schedule.lowerCards.forEach((card) => lowerGrid.appendChild(renderCard(card, model.sample)));
-        details.appendChild(lowerGrid);
+        if (lowerDays.length) renderDayList(details, lowerDays);
+        else {
+            const lowerGrid = el('div', 's1-cards');
+            lowerCards.forEach((card) => lowerGrid.appendChild(renderCard(card, model.sample)));
+            details.appendChild(lowerGrid);
+        }
         details.addEventListener('toggle', () => { lowerOpen = details.open; });
         host.appendChild(details);
     }
@@ -738,12 +751,19 @@ function renderSheet(model) {
     const data = model.sheet;
     sheetTitle.textContent = data.title;
     if (model.sample) sheetBody.appendChild(el('p', 's1-kicker', 'Sample'));
-    sheetBody.appendChild(el('p', data.timeMuted ? 's1-match-primary s1-time-muted' : 's1-match-primary', data.primary));
-    sheetBody.appendChild(el('p', `s1-chip s1-chip-${data.phase}`, data.chip));
+    const line = data.slotKind === 'time' ? data.timeText : data.detail;
+    if (line) {
+        sheetBody.appendChild(el('p', data.slotKind === 'scheduled' ? 's1-match-primary s1-time-muted' : 's1-match-primary', line));
+    }
+    if (data.slot) sheetBody.appendChild(el('p', `s1-slot s1-chip s1-chip-${chipModifier(data.slotKind)}`, data.slot));
+    if (data.round) sheetBody.appendChild(el('p', 's1-note', data.round));
     [data.p1, data.p2].forEach((player, index) => {
         const block = el('div', 's1-sheet-player');
         const nameText = [player.name, player.rank].filter(Boolean).join(' ');
         const name = link('s1-hit s1-sheet-name', nameText, player.href, 'view');
+        if ((index === 0 && data.winnerSide === 'p1') || (index === 1 && data.winnerSide === 'p2')) {
+            name.classList.add('s1-name-winner');
+        }
         block.appendChild(name);
         if (player.seed) block.appendChild(el('span', 's1-note', `Seed ${player.seed}`));
         if (model.sample) {
