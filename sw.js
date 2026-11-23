@@ -24,7 +24,6 @@ const SHELL_ASSETS = [
     '/player.html',
     '/styles.css',
     '/shared.js',
-    '/auth.js',
     '/player-panel.js',
     '/components/RivalryArc.js',
     '/components/H2HPresenter.js',
@@ -100,11 +99,9 @@ self.addEventListener('fetch', function (event) {
 
     // Personal endpoints: bypass the SW entirely. The API cache is shared and
     // keyed by URL only, so a per-user 200 must never be stored or replayed
-    // (including when a later request 401s). /api/bracket/ covers mine, save,
-    // leaders, public, and anything added later. Offline, these fail naturally.
-    if (url.pathname.startsWith('/api/auth/')
-        || url.pathname.startsWith('/api/favorites')
-        || url.pathname.startsWith('/api/bracket/')) {
+    // (including when a later request 401s). Auth, me, picks, leaderboard,
+    // favorites, and bracket responses stay out of Cache Storage.
+    if (isPrivateApi(url.pathname)) {
         return;
     }
 
@@ -129,6 +126,15 @@ self.addEventListener('fetch', function (event) {
     // Everything else (fonts, images, manifest): cache-first for performance
     event.respondWith(cacheFirstWithNetwork(event.request, SHELL_CACHE));
 });
+
+function isPrivateApi(pathname) {
+    return pathname.startsWith('/api/auth/')
+        || pathname.startsWith('/api/favorites')
+        || pathname.startsWith('/api/bracket/')
+        || pathname === '/api/me' || pathname.startsWith('/api/me/')
+        || pathname === '/api/picks' || pathname.startsWith('/api/picks/')
+        || pathname === '/api/leaderboard' || pathname.startsWith('/api/leaderboard/');
+}
 
 // ── Strategies ────────────────────────────────────────────────────────────────
 

@@ -265,7 +265,11 @@ body {
 .nav-cta {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.4rem;
+    min-height: 44px;
+    box-sizing: border-box;
+    text-decoration: none;
     background: transparent;
     color: var(--text-on-dark);
     border: 1px solid rgba(255,255,255,0.2);

@@ -89,7 +89,7 @@ describe('TW Security acceptance checklist', () => {
         expect(scoresHtml).not.toMatch(/chart\.js/i);
         expect(scoresHtml).not.toMatch(/cdn\.jsdelivr/);
         expect(scoresHtml).not.toMatch(/google-analytics|googletagmanager|gtag\(/i);
-        expect(scoresHtml).toMatch(/<script src="auth\.js"><\/script>/);
+        expect(scoresHtml).not.toMatch(/<script src="auth\.js"><\/script>/);
         expect(scoresHtml).toMatch(/<script src="shared\.js"><\/script>/);
         const scriptSrcs = [...scoresHtml.matchAll(/<script[^>]+src=['"]([^'"]+)['"]/g)].map(m => m[1]);
         const thirdParty = scriptSrcs.filter(s => /^https?:\/\//.test(s));

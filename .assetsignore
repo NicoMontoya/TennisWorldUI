@@ -2,7 +2,7 @@
 # Gitignore syntax. Publish only files the browser loads.
 # That includes HTML (sprint1.html included), shell/, components/ (not tests),
 # vendor/, sw.js, manifest.json, robots.txt, icons, CSS, and app JS
-# such as shared.js and auth.js.
+# such as shared.js.
 
 # VCS and OS junk
 .git

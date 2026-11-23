@@ -4,7 +4,6 @@ import { describe, it, expect } from 'vitest';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const swSrc = read('./sw.js');
-const authSrc = read('./auth.js');
 const sharedSrc = read('./shared.js');
 const profileSrc = read('./profile.js');
 
@@ -82,6 +81,8 @@ function loadServiceWorker() {
                 'tw-v51-shell',
                 'tw-v52-api',
                 'tw-v52-shell',
+                'tw-v53-api',
+                'tw-v53-shell',
                 'tw-v54-api',
                 'tw-v54-shell',
             ]);
@@ -159,23 +160,6 @@ function pageDocument(listeners) {
     };
 }
 
-function loadAuth({ caches, apiFetch, storage }) {
-    const listeners = {};
-    const context = vm.createContext({
-        document: pageDocument(listeners),
-        localStorage: storage,
-        caches,
-        apiFetch,
-        window: {},
-        CustomEvent,
-        Promise,
-        console,
-    });
-    vm.runInContext(extractFunction(sharedSrc, 'clearSwApiCache'), context);
-    vm.runInContext(authSrc, context);
-    return { context, listeners, auth: context.window.TW.auth };
-}
-
 function stubEl() {
     return {
         style: {},
@@ -241,6 +225,12 @@ describe('service worker bracket bypass', () => {
         expect(sw.handleFetch('/shell/fixtures.js')).toBeUndefined();
         expect(sw.handleFetch('/shell/sprint1.js')).toBeUndefined();
         expect(sw.handleFetch('/api/auth/me')).toBeUndefined();
+        expect(sw.handleFetch('/api/me')).toBeUndefined();
+        expect(sw.handleFetch('/api/me/record')).toBeUndefined();
+        expect(sw.handleFetch('/api/picks')).toBeUndefined();
+        expect(sw.handleFetch('/api/picks/open')).toBeUndefined();
+        expect(sw.handleFetch('/api/leaderboard')).toBeUndefined();
+        expect(sw.handleFetch('/api/leaderboard/week')).toBeUndefined();
         expect(sw.handleFetch('/api/favorites')).toBeUndefined();
         expect(sw.handleFetch('/api/favorites/toggle')).toBeUndefined();
         expect(sw.opened).toEqual([]);
@@ -339,6 +329,8 @@ describe('service worker bracket bypass', () => {
             'tw-v51-shell',
             'tw-v52-api',
             'tw-v52-shell',
+            'tw-v53-api',
+            'tw-v53-shell',
         ]);
         expect(sw.self.clients.claimed).toBe(true);
     });
@@ -392,85 +384,23 @@ describe('clearSwApiCache', () => {
     });
 });
 
-describe('sign-out clears the API cache', () => {
-    it('TW.auth.signOut drops the session and awaits API-cache deletion', async () => {
-        const deleted = [];
-        let releaseDelete;
-        const gate = new Promise((resolve) => { releaseDelete = resolve; });
+describe('legacy auth keys are removed and never stored', () => {
+    it('clearLegacyAuthKeys drops the old token keys', () => {
         const storage = memoryStorage({
             'tw-auth-token': 'secret-token',
             'tw-auth-user': JSON.stringify({ firstName: 'Ada', lastName: 'Lovelace' }),
         });
-        const { auth } = loadAuth({
-            storage,
-            apiFetch: () => Promise.reject(new Error('offline')),
-            caches: {
-                keys: () => Promise.resolve(['tw-v48-api', 'tw-v47-api', 'tw-v48-shell']),
-                delete(name) {
-                    deleted.push(name);
-                    return gate.then(() => true);
-                },
-            },
-        });
-
-        let settled = false;
-        const pending = auth.signOut().then(() => { settled = true; });
-        await flush();
-        expect(settled).toBe(false);
+        const context = vm.createContext({ localStorage: storage });
+        vm.runInContext(extractFunction(sharedSrc, 'clearLegacyAuthKeys'), context);
+        context.clearLegacyAuthKeys();
         expect(storage.getItem('tw-auth-token')).toBeNull();
         expect(storage.getItem('tw-auth-user')).toBeNull();
-        expect(deleted).toEqual(['tw-v48-api', 'tw-v47-api']);
-
-        releaseDelete();
-        await pending;
-        expect(settled).toBe(true);
+        expect(sharedSrc).not.toMatch(/setItem\(\s*['"]tw-auth-token['"]/);
+        expect(sharedSrc).not.toMatch(/setItem\(\s*['"]tw-auth-user['"]/);
+        expect(sharedSrc).not.toMatch(/Authorization/);
     });
 
-    it('still signs out when cache cleanup throws', async () => {
-        const storage = memoryStorage({
-            'tw-auth-token': 'secret-token',
-            'tw-auth-user': '{}',
-        });
-        const { auth, context } = loadAuth({
-            storage,
-            apiFetch: () => Promise.resolve({}),
-            caches: {
-                keys: () => Promise.resolve([]),
-                delete: () => Promise.resolve(true),
-            },
-        });
-        context.clearSwApiCache = () => { throw new Error('SecurityError'); };
-        await expect(auth.signOut()).resolves.toBeUndefined();
-        expect(storage.getItem('tw-auth-token')).toBeNull();
-        expect(storage.getItem('tw-auth-user')).toBeNull();
-    });
-
-    it('clears the API cache when /api/auth/me fails and auth.js drops the token', async () => {
-        const deleted = [];
-        const storage = memoryStorage({
-            'tw-auth-token': 'secret-token',
-            'tw-auth-user': JSON.stringify({ firstName: 'Ada', lastName: 'Lovelace' }),
-        });
-        const { listeners } = loadAuth({
-            storage,
-            apiFetch: () => Promise.reject(new Error('HTTP 401')),
-            caches: {
-                keys: () => Promise.resolve(['tw-v48-api', 'tw-v48-shell']),
-                delete(name) {
-                    deleted.push(name);
-                    return Promise.resolve(true);
-                },
-            },
-        });
-
-        for (const fn of listeners.DOMContentLoaded) fn();
-        await flush();
-        expect(storage.getItem('tw-auth-token')).toBeNull();
-        expect(storage.getItem('tw-auth-user')).toBeNull();
-        expect(deleted).toEqual(['tw-v48-api']);
-    });
-
-    it('clears the API cache when profile.js drops the token after /api/auth/me fails', async () => {
+    it('profile.js drops the old keys on load and does not call the API', async () => {
         const deleted = [];
         const storage = memoryStorage({
             'tw-auth-token': 'secret-token',
@@ -481,9 +411,10 @@ describe('sign-out clears the API cache', () => {
                 favorites: [],
             }),
         });
+        let called = false;
         const { listeners } = loadProfile({
             storage,
-            apiFetch: () => Promise.reject(new Error('HTTP 401')),
+            apiFetch: () => { called = true; return Promise.reject(new Error('should not fetch')); },
             caches: {
                 keys: () => Promise.resolve(['tw-v48-api', 'tw-v47-api', 'tw-v48-shell']),
                 delete(name) {
@@ -495,8 +426,9 @@ describe('sign-out clears the API cache', () => {
 
         for (const fn of listeners.DOMContentLoaded) fn();
         await flush();
+        expect(called).toBe(false);
         expect(storage.getItem('tw-auth-token')).toBeNull();
         expect(storage.getItem('tw-auth-user')).toBeNull();
-        expect(deleted).toEqual(['tw-v48-api', 'tw-v47-api']);
+        expect(deleted).toEqual([]);
     });
 });
