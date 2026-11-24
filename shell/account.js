@@ -1,5 +1,6 @@
 // DOM for /me and /picks. User strings are assigned with textContent only.
 
+import { PICK_SEGMENTS, PICKS_COPY } from './picks.js';
 import { GATE_COPY, guestLine } from './viewModel.js';
 
 function el(tag, className, text) {
@@ -65,7 +66,7 @@ export function renderMe(host, model, actions = {}) {
     if (state.pending && state.status === 'member') {
         const pending = el('div', 's1-account');
         pending.setAttribute('aria-busy', 'true');
-        pending.appendChild(el('p', 's1-note', GATE_COPY.record));
+        if (state.record) pending.appendChild(el('p', 's1-note', state.record));
         host.appendChild(pending);
         return;
     }
@@ -231,7 +232,7 @@ function renderMember(host, model, actions) {
     follows.forEach((favorite) => {
         card.appendChild(el('p', 's1-follow', favorite.name || ''));
     });
-    card.appendChild(el('p', 's1-note', GATE_COPY.record));
+    if (model.record) card.appendChild(el('p', 's1-note', model.record));
     const signOut = el('button', 's1-secondary s1-hit', GATE_COPY.signOut);
     signOut.type = 'button';
     signOut.disabled = Boolean(model.submitting);
@@ -240,16 +241,191 @@ function renderMember(host, model, actions) {
     host.appendChild(card);
 }
 
+function setAttrs(node, attrs) {
+    Object.keys(attrs).forEach((name) => node.setAttribute(name, attrs[name]));
+}
+
+function playerAria(player, locked) {
+    if (locked) return `Locked, ${player.name}`;
+    if (player.picked) return `Picked ${player.name}`;
+    return `Pick ${player.name}`;
+}
+
+function renderSegments(segment) {
+    const tabs = el('div', 's1-segment');
+    setAttrs(tabs, { role: 'tablist', 'aria-label': 'Picks' });
+    PICK_SEGMENTS.forEach((item) => {
+        const selected = item.id === segment;
+        const button = el('button', selected ? 's1-segment-btn s1-hit is-active' : 's1-segment-btn s1-hit', item.label);
+        button.type = 'button';
+        setAttrs(button, {
+            role: 'tab',
+            'aria-selected': selected ? 'true' : 'false',
+            'data-action': 'board',
+            'data-board': item.id,
+        });
+        tabs.appendChild(button);
+    });
+    return tabs;
+}
+
+function renderOpen(host, model) {
+    if (model.loading) return;
+    if (model.loadError) {
+        host.appendChild(el('p', 's1-error', model.loadError));
+        return;
+    }
+    if (!model.groups || !model.groups.length) {
+        host.appendChild(el('p', 's1-empty', model.emptyOpen || PICKS_COPY.emptyOpen));
+        return;
+    }
+    (model.groups || []).forEach((group) => {
+        host.appendChild(el('h2', 's1-group-title', group.name || ''));
+        (group.matches || []).forEach((match) => host.appendChild(renderMatchCard(match)));
+    });
+}
+
+function renderMatchCard(match) {
+    const card = el('article', match.locked ? 's1-pick-card is-locked' : 's1-pick-card');
+    setAttrs(card, { 'data-match-key': match.matchKey });
+    const halves = el('div', 's1-pick-halves');
+    (match.players || []).forEach((player) => halves.appendChild(renderHalf(match, player)));
+    card.appendChild(halves);
+    if (match.subline) card.appendChild(el('p', 's1-pick-meta', match.subline));
+    if (match.lockText) card.appendChild(el('p', 's1-pick-lock', match.lockText));
+    if (match.error) {
+        const error = el('p', 's1-error', match.error);
+        error.setAttribute('role', 'alert');
+        card.appendChild(error);
+    }
+    return card;
+}
+
+function renderHalf(match, player) {
+    const picked = Boolean(player.picked);
+    const button = el('button', picked ? 's1-pick-half s1-hit is-picked' : 's1-pick-half s1-hit');
+    button.type = 'button';
+    button.disabled = Boolean(match.locked);
+    setAttrs(button, {
+        'data-action': 'pick',
+        'data-match-key': match.matchKey,
+        'data-player-key': player.key,
+        'aria-label': playerAria(player, match.locked),
+        'aria-pressed': picked ? 'true' : 'false',
+    });
+    if (match.locked) button.setAttribute('aria-disabled', 'true');
+    button.appendChild(el('span', 's1-pick-name', player.name || ''));
+    if (picked) {
+        const mark = el('span', 's1-pick-mark', PICKS_COPY.check);
+        mark.setAttribute('aria-hidden', 'true');
+        button.appendChild(mark);
+    }
+    return button;
+}
+
+function renderMine(host, model) {
+    const mine = model.mine || {};
+    if (model.loading) return;
+    if (model.loadError) {
+        host.appendChild(el('p', 's1-error', model.loadError));
+        return;
+    }
+    if (mine.showRecord) {
+        const head = el('div', 's1-record-head');
+        head.appendChild(el('p', 's1-record-score', mine.record || ''));
+        head.appendChild(el('p', 's1-record-points', mine.points || ''));
+        host.appendChild(head);
+    }
+    if (!mine.rows || !mine.rows.length) {
+        host.appendChild(el('p', 's1-empty', mine.empty || PICKS_COPY.emptyMine));
+        return;
+    }
+    const list = el('ul', 's1-mine-list');
+    (mine.rows || []).forEach((row) => {
+        const item = el('li', `s1-mine-row is-${row.result || 'pending'}`);
+        const main = el('div', 's1-mine-main');
+        main.appendChild(el('p', 's1-mine-names', row.names || ''));
+        if (row.picked) main.appendChild(el('p', 's1-mine-picked', row.picked));
+        if (row.meta) main.appendChild(el('p', 's1-note', row.meta));
+        item.appendChild(main);
+        const status = el('p', 's1-mine-status', row.label || '');
+        if (row.mark) {
+            const mark = el('span', 's1-mine-mark', ` ${row.mark}`);
+            mark.setAttribute('aria-hidden', 'true');
+            status.appendChild(mark);
+        }
+        if (row.extra) status.appendChild(el('span', 's1-mine-extra', ` ${row.extra}`));
+        item.appendChild(status);
+        list.appendChild(item);
+    });
+    host.appendChild(list);
+}
+
+function fillBoardRow(node, row) {
+    node.appendChild(el('span', 's1-board-rank', String(row.rank)));
+    node.appendChild(el('span', 's1-board-name', row.displayName || ''));
+    const score = el('span', 's1-board-score');
+    score.appendChild(el('span', 's1-board-points', row.pointsLabel || `${row.points} pts`));
+    if (row.accuracyLabel) score.appendChild(el('span', 's1-board-acc', row.accuracyLabel));
+    node.appendChild(score);
+}
+
+function renderBoard(host, model) {
+    const board = model.board || {};
+    if (model.loading) return;
+    if (model.loadError) {
+        host.appendChild(el('p', 's1-error', model.loadError));
+        return;
+    }
+    if (!board.rows || !board.rows.length) {
+        host.appendChild(el('p', 's1-empty', board.empty || PICKS_COPY.emptyBoard));
+        return;
+    }
+    const list = el('ol', 's1-board-list');
+    let mine = null;
+    (board.rows || []).forEach((row) => {
+        const item = el('li', row.mine ? 's1-board-row is-mine' : 's1-board-row');
+        if (row.mine) {
+            item.setAttribute('data-mine-row', '1');
+            mine = row;
+        }
+        fillBoardRow(item, row);
+        list.appendChild(item);
+    });
+    host.appendChild(list);
+    if (mine) {
+        const pin = el('div', 's1-board-pin');
+        pin.hidden = true;
+        setAttrs(pin, { 'data-pin': '1', 'aria-hidden': 'true' });
+        fillBoardRow(pin, mine);
+        host.appendChild(pin);
+    }
+}
+
+export function syncMinePin(root, frame) {
+    if (!root || typeof root.querySelector !== 'function') return;
+    const pin = root.querySelector('[data-pin]');
+    if (!pin) return;
+    const row = root.querySelector('[data-mine-row]');
+    if (!row || !frame || typeof row.getBoundingClientRect !== 'function') {
+        pin.hidden = true;
+        return;
+    }
+    const rect = row.getBoundingClientRect();
+    const inset = Number(frame.insetBottom) || 0;
+    const off = rect.top < frame.top || rect.bottom > frame.bottom - inset;
+    pin.hidden = !(rect.height > 0 && off);
+}
+
 export function renderPicks(host, model) {
     const state = model || {};
     host.appendChild(el('h1', 's1-title', GATE_COPY.picksTitle));
     if (state.sampleNote) host.appendChild(el('p', 's1-kicker', state.sampleNote));
     if (state.status === 'member') {
-        const button = el('button', 's1-pick s1-hit', GATE_COPY.picksSoon);
-        button.type = 'button';
-        button.disabled = true;
-        button.setAttribute('aria-disabled', 'true');
-        host.appendChild(button);
+        host.appendChild(renderSegments(state.segment || 'open'));
+        if ((state.segment || 'open') === 'mine') renderMine(host, state);
+        else if (state.segment === 'leaders') renderBoard(host, state);
+        else renderOpen(host, state);
         return;
     }
     const card = el('section', 's1-account s1-teaser');

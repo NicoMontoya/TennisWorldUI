@@ -243,7 +243,7 @@ describe('shell data and view', () => {
             viewer: { ...user, member: true, sampleSession: false },
         });
         expect(me.me.displayName).toBe('Ada Lovelace');
-        expect(me.me.recordNote).toBe('Pick record coming soon');
+        expect(me.me.recordNote).toBe('');
         expect(JSON.stringify(me.me)).not.toMatch(/@/);
         const memberPicks = buildView({
             data: loadShellData({ allowed: true, state: 'ready', dataset: buildSampleDataset(), now: NOW }),
@@ -252,8 +252,24 @@ describe('shell data and view', () => {
             timeZone: ZONE,
             viewer: { signedIn: true, member: true, displayName: 'Ada Lovelace', follows: [], sampleSession: false },
         });
-        expect(memberPicks.picks.label).toBe('Picks open soon');
+        expect(memberPicks.picks.gate).toBe('member');
+        expect(memberPicks.picks.segment).toBe('open');
         expect(memberPicks.picks.teaser).toBe('');
+        const withRecord = buildView({
+            data: loadShellData({ allowed: true, state: 'ready', dataset: buildSampleDataset(), now: NOW }),
+            route: { ...parseLocation('/me', '?sample=1'), sample: true },
+            now: NOW,
+            timeZone: ZONE,
+            viewer: {
+                signedIn: true,
+                member: true,
+                displayName: 'Ada Lovelace',
+                follows: [],
+                sampleSession: false,
+                record: '2\u20131 \u00b7 2 pts',
+            },
+        });
+        expect(withRecord.me.recordNote).toBe('2\u20131 \u00b7 2 pts');
     });
 });
 
@@ -348,7 +364,7 @@ describe('preview server and cache boundaries', () => {
         const shared = read('./shared.js');
         const page = read('./sprint1.html');
         const app = read('./shell/sprint1.js');
-        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v54'/);
+        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v55'/);
         expect(sw).toMatch(/pathname === '\/sprint1\.html'/);
         expect(sw).toMatch(/pathname\.startsWith\('\/shell\/'\)/);
         expect(sw).not.toMatch(/SHELL_ASSETS[\s\S]*fixtures\.js/);
@@ -356,7 +372,7 @@ describe('preview server and cache boundaries', () => {
         expect(shared).toMatch(/data-tw-preview'\) === 'sprint1'/);
         expect(page).toMatch(/noindex,nofollow/);
         expect(page).toMatch(/src="\/shared\.js"/);
-        expect(page).toMatch(/src="\/shell\/sprint1\.js\?v=tw54"/);
+        expect(page).toMatch(/src="\/shell\/sprint1\.js\?v=tw55"/);
         expect(page).not.toMatch(/src="shared\.js"/);
         expect(page).not.toMatch(/cloudflareinsights|innerHTML/);
         expect(app).not.toMatch(/innerHTML|apiFetch|insertAdjacentHTML/);

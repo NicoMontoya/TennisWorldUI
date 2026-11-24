@@ -8,7 +8,16 @@ import { buildMatchRow, chipModifier } from './matchRow.js';
 import { applyNav, planClick } from './navPlan.js';
 import { sampleFixturesAllowed } from './previewGate.js';
 import { hrefFor, parseLocation, safeId } from './router.js';
-import { renderMe, renderPicks } from './account.js';
+import { renderMe, renderPicks, syncMinePin } from './account.js';
+import {
+    actionFromSave,
+    emptyBoardState,
+    idleBoard,
+    presentPicks,
+    reducePicks,
+    sampleBoard,
+} from './picks.js';
+import { loadMemberPicks, savePick } from './picksClient.js';
 import {
     displayNameFromUser,
     followsFromUser,
@@ -19,6 +28,7 @@ import {
     redeemInvite,
     registerAccount,
     saveDisplayName,
+    shouldFetchPicks,
     viewerFromSession,
     NETWORK_ERROR,
 } from './session.js';
@@ -43,6 +53,9 @@ let lastSheetOpen = false;
 let liveAccount = null;
 let sessionStarted = false;
 let cooldownTimer = null;
+let livePicks = idleBoard();
+let samplePicksState = null;
+let lockTimer = null;
 
 const accountUi = {
     tab: 'invite',
@@ -283,6 +296,8 @@ async function runSignOut() {
     accountUi.editing = false;
     accountUi.tab = 'invite';
     liveAccount = blankAccount('signed-out');
+    livePicks = idleBoard();
+    samplePicksState = null;
     paint();
 }
 
@@ -652,15 +667,122 @@ function renderRankings(host, model) {
     host.appendChild(table);
 }
 
-function renderPicksScreen(host, account) {
-    renderPicks(host, {
-        status: account.status,
-        sampleNote: account.sampleNote,
+function boardState(account, route) {
+    if (account.sampleSession) {
+        if (route.picksEmpty) return emptyBoardState();
+        if (!samplePicksState) samplePicksState = sampleBoard(Date.now());
+        return samplePicksState;
+    }
+    return livePicks;
+}
+
+function storeBoard(account, next) {
+    if (account.sampleSession) samplePicksState = next;
+    else livePicks = next;
+}
+
+function picksView(account, route) {
+    return presentPicks(boardState(account, route), {
+        segment: route.board,
+        now: Date.now(),
+        timeZone: zone(),
+        displayName: account.displayName,
     });
 }
 
-function renderMeScreen(host, account) {
-    renderMe(host, meScreen(account), accountActions());
+function renderPicksScreen(host, account, route) {
+    const presented = account.status === 'member' ? picksView(account, route) : {};
+    renderPicks(host, {
+        status: account.status,
+        sampleNote: account.sampleNote,
+        ...presented,
+    });
+}
+
+function renderMeScreen(host, account, route) {
+    const record = account.status === 'member' ? picksView(account, route).meLine : '';
+    renderMe(host, { ...meScreen(account), record }, accountActions());
+}
+
+function kickPicks(account) {
+    if (!shouldFetchPicks(account)) return;
+    if (livePicks.phase === 'loading' || livePicks.phase === 'ready' || livePicks.phase === 'error') return;
+    livePicks = { ...livePicks, phase: 'loading' };
+    loadMemberPicks().then((result) => {
+        if (!liveAccount || liveAccount.status !== 'member') return;
+        if (result.auth === 'signed-out') {
+            liveAccount = blankAccount('signed-out');
+            livePicks = idleBoard();
+        } else if (result.auth === 'guest') {
+            liveAccount = { ...blankAccount('guest'), displayName: (liveAccount && liveAccount.displayName) || '' };
+            livePicks = idleBoard();
+        } else if (result.state) {
+            livePicks = result.state;
+        } else {
+            livePicks = { ...idleBoard(), phase: 'error', loadError: NETWORK_ERROR };
+        }
+        paint();
+    }).catch(() => {
+        livePicks = { ...idleBoard(), phase: 'error', loadError: NETWORK_ERROR };
+        paint();
+    });
+}
+
+function submitPick(matchKey, playerKey) {
+    const allowed = gateOpen();
+    const route = currentRoute();
+    const account = accountFor(allowed, route);
+    if (account.status !== 'member' || !matchKey || !playerKey) return;
+    const next = reducePicks(boardState(account, route), { type: 'tap', matchKey, playerKey });
+    storeBoard(account, next.state);
+    paint();
+    if (!next.request || account.sampleSession || !shouldFetchPicks(account)) return;
+    const pending = next.request;
+    savePick(pending.matchKey, pending.playerKey).then((result) => {
+        const reduced = reducePicks(livePicks, actionFromSave(pending, result));
+        if (reduced.state.auth === 'signed-out') {
+            liveAccount = blankAccount('signed-out');
+            livePicks = idleBoard();
+        } else if (reduced.state.auth === 'guest') {
+            liveAccount = { ...blankAccount('guest'), displayName: (liveAccount && liveAccount.displayName) || '' };
+            livePicks = idleBoard();
+        } else {
+            livePicks = reduced.state;
+        }
+        paint();
+    }).catch(() => {
+        livePicks = reducePicks(livePicks, actionFromSave(pending, { network: true, status: 0 })).state;
+        paint();
+    });
+}
+
+function pinFrame() {
+    const rect = main.getBoundingClientRect();
+    const tabs = document.querySelector('.s1-tabs');
+    let insetBottom = 0;
+    if (tabs && typeof getComputedStyle === 'function' && getComputedStyle(tabs).display !== 'none') {
+        insetBottom = tabs.getBoundingClientRect().height;
+    }
+    return { top: rect.top, bottom: rect.bottom, insetBottom };
+}
+
+function refreshMinePin() {
+    const screen = main.querySelector('.s1-screen');
+    if (screen) syncMinePin(screen, pinFrame());
+}
+
+function armLockLabels(view) {
+    if (view !== 'picks') {
+        if (lockTimer) clearInterval(lockTimer);
+        lockTimer = null;
+        return;
+    }
+    if (lockTimer) return;
+    lockTimer = setInterval(() => {
+        if (document.hidden) return;
+        if (currentRoute().view !== 'picks') return;
+        paint();
+    }, 30000);
 }
 
 function renderGates(host, model) {
@@ -866,6 +988,7 @@ async function paint() {
     const allowed = gateOpen();
     const route = currentRoute();
     const account = accountFor(allowed, route);
+    if (account.status === 'member' && (route.view === 'picks' || route.view === 'me')) kickPicks(account);
     if (!allowed && !liveFeed) renderSkeleton();
     const data = await shellData(allowed, route);
     if (token !== paintToken) return;
@@ -891,8 +1014,8 @@ async function paint() {
     else if (model.view === 'tournament') renderTournament(screen, model);
     else if (model.view === 'player') renderPlayer(screen, model);
     else if (model.view === 'rankings') renderRankings(screen, model);
-    else if (model.view === 'picks') renderPicksScreen(screen, account);
-    else if (model.view === 'me') renderMeScreen(screen, account);
+    else if (model.view === 'picks') renderPicksScreen(screen, account, route);
+    else if (model.view === 'me') renderMeScreen(screen, account, route);
     renderGates(screen, model);
     main.appendChild(screen);
     if (model.view === 'tournament' && model.tournament && !model.tournament.missing && model.tournament.tab === 'draw') {
@@ -904,6 +1027,8 @@ async function paint() {
     }
     highlightNav(model);
     renderSheet(model);
+    armLockLabels(model.view);
+    refreshMinePin();
     document.title = model.sample ? 'TennisWorld — Sample preview' : 'TennisWorld';
     armLiveRefresh(allowed);
 }
@@ -961,6 +1086,17 @@ function onClick(event) {
         }
         if (action === 'session') {
             go({ kind: 'filter', patch: { session: actionNode.dataset.session || null } });
+            return;
+        }
+        if (action === 'board') {
+            const board = actionNode.dataset.board;
+            if (board === 'open' || board === 'mine' || board === 'leaders') {
+                go({ kind: 'filter', patch: { board } });
+            }
+            return;
+        }
+        if (action === 'pick') {
+            submitPick(actionNode.dataset.matchKey, actionNode.dataset.playerKey);
             return;
         }
         if (action === 'close-sheet') {
@@ -1029,6 +1165,7 @@ window.addEventListener('popstate', () => {
 });
 main.addEventListener('scroll', () => {
     const state = history.state;
+    refreshMinePin();
     if (!state || !state.tw) return;
     history.replaceState({ ...state, scrollY: main.scrollTop }, '');
 }, { passive: true });

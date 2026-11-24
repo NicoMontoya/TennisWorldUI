@@ -65,8 +65,9 @@ export function followsFromUser(user) {
     }).filter(Boolean);
 }
 
-export function shouldFetchPicks() {
-    return false;
+export function shouldFetchPicks(session) {
+    if (!session || session.sampleSession) return false;
+    return session.status === 'member';
 }
 
 function userFromJson(json) {

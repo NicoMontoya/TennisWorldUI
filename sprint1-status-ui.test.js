@@ -315,7 +315,7 @@ describe('reduced motion and text rendering', () => {
         expect(view).not.toMatch(/\.innerHTML|insertAdjacentHTML/);
         expect(page.match(/<script/g)).toHaveLength(5);
         expect(page).not.toMatch(/auth\.js/);
-        expect(read('./sw.js')).toMatch(/CACHE_VERSION\s*=\s*'tw-v54'/);
+        expect(read('./sw.js')).toMatch(/CACHE_VERSION\s*=\s*'tw-v55'/);
 
         const doc = createDoc();
         const host = doc.createElement('div');
