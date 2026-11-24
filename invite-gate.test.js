@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { renderMe, renderPicks } from './shell/account.js';
-import { GATE_COPY, guestLine } from './shell/viewModel.js';
+import { guestLine } from './shell/viewModel.js';
 import {
     COOLDOWN_SECONDS,
     NETWORK_ERROR,
@@ -100,9 +100,11 @@ describe('invite gate copy and states', () => {
             status: 'member',
             displayName: SCRIPT_NAME,
             follows: [{ name: SCRIPT_NAME }],
+            record: '1\u20130 \u00b7 1 pts',
         });
         expect(host.textContent).toContain(SCRIPT_NAME);
-        expect(host.textContent).toContain('Pick record coming soon');
+        expect(host.textContent).toContain('1\u20130 \u00b7 1 pts');
+        expect(host.textContent).not.toContain('Pick record coming soon');
         expect(walk(host).some((node) => node.tagName === 'SCRIPT')).toBe(false);
 
         const guest = mount();
@@ -149,7 +151,7 @@ describe('invite gate copy and states', () => {
         expect(member.textContent).toContain('4/24');
         expect(member.textContent).toContain('Followed players');
         expect(member.textContent).toContain('Ada Sample');
-        expect(member.textContent).toContain(GATE_COPY.record);
+        expect(member.textContent).not.toContain('Pick record coming soon');
         expect(member.textContent).toContain('Sign out');
     });
 
@@ -193,10 +195,15 @@ describe('invite gate copy and states', () => {
 
         const member = mount();
         renderPicks(member, { status: 'member' });
-        expect(member.textContent).toContain('Picks open soon');
+        expect(member.textContent).toContain('Open');
+        expect(member.textContent).toContain('My picks');
+        expect(member.textContent).toContain('Leaderboard');
+        expect(member.textContent).toContain('No matches to pick right now. Check back soon.');
+        expect(member.textContent).not.toContain('Picks open soon');
         expect(member.textContent).not.toContain('Have an invite?');
-        const soon = buttons(member)[0];
-        expect(soon.disabled).toBe(true);
+        const open = buttons(member).find((node) => node.textContent === 'Open');
+        expect(open.getAttribute('aria-selected')).toBe('true');
+        expect(open.disabled).toBe(false);
         expect(calls).toEqual([]);
         expect(shouldFetchPicks()).toBe(false);
         ['shell/account.js', 'shell/session.js', 'shell/sprint1.js'].forEach((file) => {
@@ -331,9 +338,9 @@ describe('legacy sign-in is gone and pages are noindex', () => {
         expect(read('shell/session.js')).not.toMatch(/setItem\(\s*['"]tw-auth-/);
     });
 
-    it('bumps the service worker to tw-v54 and skips private API caches', () => {
+    it('bumps the service worker to tw-v55 and skips private API caches', () => {
         const sw = read('sw.js');
-        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v54'/);
+        expect(sw).toMatch(/CACHE_VERSION\s*=\s*'tw-v55'/);
         expect(sw).toMatch(/\/api\/picks/);
         expect(sw).toMatch(/\/api\/leaderboard/);
         expect(sw).toMatch(/\/api\/me/);

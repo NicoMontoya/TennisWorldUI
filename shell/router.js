@@ -4,6 +4,7 @@
 
 const VIEWS = new Set(['today', 'schedule', 'picks', 'rankings', 'me', 'tournament', 'player']);
 const SEGMENTS = new Set(['past', 'now', 'upnext']);
+const BOARDS = new Set(['open', 'mine', 'leaders']);
 const TABS = new Set(['matches', 'draw', 'results']);
 const STATES = new Set(['ready', 'empty', 'error', 'stale']);
 
@@ -67,6 +68,7 @@ export function parseLocation(pathname, search) {
     const month = /^\d{4}-\d{2}$/.test(params.get('month') || '') ? params.get('month') : null;
     const state = STATES.has(params.get('state')) ? params.get('state') : 'ready';
     const session = params.get('session') === 'sample' ? 'sample' : null;
+    const board = BOARDS.has(params.get('board')) ? params.get('board') : 'open';
 
     return {
         view,
@@ -79,6 +81,8 @@ export function parseLocation(pathname, search) {
         tour: parseTour(params.get('tour')) || 'ATP',
         state,
         session,
+        board,
+        picksEmpty: params.get('picks') === 'empty',
         sample: params.get('sample') === '1',
         fileMode,
     };
@@ -98,6 +102,8 @@ export function hrefFor(route, currentPath) {
     if (route.matchId) params.set('match', route.matchId);
     if (route.state && route.state !== 'ready') params.set('state', route.state);
     if (route.session === 'sample') params.set('session', 'sample');
+    if (route.view === 'picks' && route.board && route.board !== 'open') params.set('board', route.board);
+    if (route.picksEmpty) params.set('picks', 'empty');
 
     let path;
     if (fileMode) {

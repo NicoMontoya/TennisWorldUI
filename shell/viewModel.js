@@ -41,14 +41,12 @@ export const GATE_COPY = {
     join: 'Join TennisWorld',
     inviteOnly: 'TennisWorld is invite-only for now.',
     redeem: 'Redeem invite',
-    record: 'Pick record coming soon',
     signOut: 'Sign out',
     edit: 'Edit',
     followed: 'Followed players',
     picksTitle: 'Picks',
     teaser: 'Pick winners with friends and family. Invite-only.',
     haveInvite: 'Have an invite?',
-    picksSoon: 'Picks open soon',
 };
 
 export function guestLine(displayName) {
@@ -672,7 +670,7 @@ export function buildView({ data, route, now, timeZone, viewer }) {
         view.picks = member
             ? {
                 gate: 'member',
-                label: GATE_COPY.picksSoon,
+                segment: route.board || 'open',
                 teaser: '',
                 action: '',
             }
@@ -706,7 +704,7 @@ export function buildView({ data, route, now, timeZone, viewer }) {
             inviteOnly: GATE_COPY.inviteOnly,
             redeemLabel: GATE_COPY.redeem,
             guestNote: signedIn && !member ? guestLine(viewer.displayName) : '',
-            recordNote: member ? GATE_COPY.record : '',
+            recordNote: member && viewer.record ? viewer.record : '',
             sampleNote: viewer.sampleSession ? 'Sample sign-in. Not a real account and not stored.' : '',
         };
     }
